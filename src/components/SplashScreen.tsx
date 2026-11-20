@@ -37,7 +37,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onDone, durationMs =
           className="w-full h-auto block object-cover select-none"
         />
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/75 to-transparent pt-14 pb-4 px-6 flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-          <div>
+          <div className="space-y-1">
             <p className="text-sm font-bold text-white tracking-wide">
               by <span className="text-accent-text">cquintella</span>
               <span className="ml-2 text-xs font-semibold text-text-secondary">v1.0.0</span>
@@ -46,10 +46,14 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onDone, durationMs =
               href="https://github.com/cquintella/pf2charsheet"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-accent-text hover:underline font-medium break-all"
+              className="text-xs text-accent-text hover:underline font-medium break-all block"
             >
               https://github.com/cquintella/pf2charsheet
             </a>
+            <div className="pt-1 space-y-0.5 text-[11px] text-text-secondary">
+              <p>Apoie com R$ 10 — <strong className="text-white">PIX:</strong> caquintella@gmail.com</p>
+              <p>Support with $2 — <strong className="text-white">PayPal:</strong> caquintella@gmail.com</p>
+            </div>
           </div>
 
           <button
