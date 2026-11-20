@@ -698,5 +698,8 @@ export const en: Record<keyof typeof ptBR, string> = {
   'companion.remove': 'Remove companion',
   'sheet.exportPdf': 'Export fillable PDF',
   'sheet.exportPdfError': 'Could not generate the character PDF.',
+  'sheet.visionRange': 'Vision range',
+  'sheet.visionRangePlaceholder': 'Range (e.g., 60 ft.)',
+  'session.needEquippedShield': 'Equip a shield in your inventory to enable Raise Shield.',
   // @end
 };

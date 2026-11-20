@@ -55,13 +55,17 @@ export interface ConditionPenalties {
  * Calcula penalidades de status e circunstância das condições ativas de PF2e Remaster.
  * Penalidades de mesmo tipo não acumulam (usa-se a maior).
  */
-export function computeConditionPenalties(session: SessionState, level: number): ConditionPenalties {
+export function computeConditionPenalties(
+  session: SessionState,
+  level: number,
+  shieldAcBonus = 0
+): ConditionPenalties {
   const c = session.conditions;
   const globalStatus = Math.max(c.frightened, c.sickened);
 
   const acStatus = Math.max(globalStatus, c.clumsy);
   const acCirc = c.offGuard ? 2 : 0;
-  const shieldBonus = session.shieldRaised ? 2 : 0;
+  const shieldBonus = session.shieldRaised && shieldAcBonus > 0 ? shieldAcBonus : 0;
 
   return {
     ac: shieldBonus - acStatus - acCirc,

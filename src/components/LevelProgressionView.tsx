@@ -181,6 +181,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
   const [session, setSession] = useState<SessionState>(DEFAULT_SESSION_STATE);
   const [companions, setCompanions] = useState<CharacterCompanion[]>([]);
   const [visionOverride, setVisionOverride] = useState<VisionType | ''>('');
+  const [visionRange, setVisionRange] = useState('');
   const [senses, setSenses] = useState('');
   const [portrait, setPortrait] = useState<string | undefined>(undefined);
   const [isPortraitPickerOpen, setIsPortraitPickerOpen] = useState(false);
@@ -371,6 +372,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
       setPortrait(typeof parsed.portrait === 'string' && parsed.portrait.trim() !== '' ? parsed.portrait : undefined);
       setCompanions(Array.isArray(parsed.companions) ? parsed.companions : []);
       setVisionOverride(typeof parsed.visionOverride === 'string' ? (parsed.visionOverride as VisionType | '') : '');
+      setVisionRange(typeof parsed.visionRange === 'string' ? parsed.visionRange : '');
       setSenses(typeof parsed.senses === 'string' ? parsed.senses : '');
       setFreeArchetype(parsed.freeArchetype === true);
       setStrikes(Array.isArray(parsed.strikes) ? parsed.strikes : []);
@@ -599,9 +601,22 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     };
   }, [currentAttributes, activeLevel, selectedClass, selectedAncestry, inventory.items]);
 
+  const equippedShield = useMemo(() => {
+    const entry = inventory.items.find(
+      (item) => item.equipped && item.item.item_type === 'shield'
+    );
+    if (!entry) return null;
+    let acBonus = 2;
+    try {
+      const sys = JSON.parse(entry.item.system_json || '{}') as { acBonus?: number };
+      if (typeof sys.acBonus === 'number' && sys.acBonus > 0) acBonus = sys.acBonus;
+    } catch { /* default +2 */ }
+    return { name: entry.item.name, acBonus };
+  }, [inventory.items]);
+
   const conditionPenalties = useMemo(
-    () => computeConditionPenalties(session, activeLevel),
-    [session, activeLevel]
+    () => computeConditionPenalties(session, activeLevel, equippedShield?.acBonus ?? 0),
+    [session, activeLevel, equippedShield]
   );
 
   const effectiveMaxHp = Math.max(1, hpStats.totalHp - conditionPenalties.maxHpReduction);
@@ -775,7 +790,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
   const effectiveVision: VisionType = visionOverride || ancestryVision;
 
   const snapshot = (level: number = currentLevel) => JSON.stringify({
-    charId, charName, level, portrait, companions, visionOverride, senses, selectedAncestry, selectedBackground, selectedClass, baseAttributes,
+    charId, charName, level, portrait, companions, visionOverride, visionRange, senses, selectedAncestry, selectedBackground, selectedClass, baseAttributes,
     initialTrainedSkills: [...initialTrainedSkills].sort(), freeArchetype, inventory, strikes, session,
     levelData: Object.fromEntries(Object.entries(levelData).map(([key, data]) => [key, {
       ...data, feats: Object.fromEntries(Object.entries(data.feats || {}).map(([slot, feat]) => {
@@ -825,6 +840,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
           portrait,
           companions,
           visionOverride,
+          visionRange,
           senses,
           inventory,
           strikes,
@@ -1063,7 +1079,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
         backgroundName: selectedBackground?.name || '',
         className: selectedClass?.name || '',
         vision: effectiveVision,
-        senses,
+        senses: [visionRange, senses].filter(Boolean).join(', '),
         attributes: currentAttributes,
         maxHp: effectiveMaxHp,
         ac: effectiveCombatStats.ac,
@@ -1283,9 +1299,9 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
             {/* Visão & Sentidos */}
             <div className="col-span-2 bg-inset border border-border-strong rounded-xl p-3 flex items-start space-x-2.5">
               <Sparkles className="w-5 h-5 text-accent-text flex-shrink-0 mt-0.5" />
-              <div className="min-w-0 flex-1 space-y-1">
+              <div className="min-w-0 flex-1 space-y-1.5">
                 <span className="text-[11px] uppercase font-bold text-text-secondary block">{t('sheet.vision')}</span>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2">
                   <select
                     aria-label={t('sheet.vision')}
                     value={effectiveVision}
@@ -1293,7 +1309,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                       const val = e.target.value as VisionType;
                       setVisionOverride(val === ancestryVision ? '' : val);
                     }}
-                    className="bg-surface border border-border-strong rounded-lg px-2 py-1 text-xs font-bold text-white"
+                    className="flex-1 min-w-0 bg-surface border border-border-strong rounded-lg px-2 py-1 text-xs font-bold text-white"
                   >
                     <option value="normal">{t('sheet.vision.normal')}</option>
                     <option value="low-light-vision">{t('sheet.vision.low-light-vision')}</option>
@@ -1302,12 +1318,20 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                   </select>
                   <input
                     type="text"
-                    value={senses}
-                    onChange={(e) => setSenses(e.target.value)}
-                    placeholder={t('sheet.sensesPlaceholder')}
-                    className="flex-1 min-w-[140px] bg-surface border border-border-subtle rounded-lg px-2 py-1 text-xs text-text-primary placeholder:text-text-muted"
+                    aria-label={t('sheet.visionRange')}
+                    value={visionRange}
+                    onChange={(e) => setVisionRange(e.target.value)}
+                    placeholder={t('sheet.visionRangePlaceholder')}
+                    className="w-24 bg-surface border border-border-strong rounded-lg px-2 py-1 text-xs text-text-primary placeholder:text-text-muted text-center"
                   />
                 </div>
+                <input
+                  type="text"
+                  value={senses}
+                  onChange={(e) => setSenses(e.target.value)}
+                  placeholder={t('sheet.sensesPlaceholder')}
+                  className="w-full bg-surface border border-border-subtle rounded-lg px-2 py-1 text-xs text-text-primary placeholder:text-text-muted"
+                />
               </div>
             </div>
           </div>
@@ -1374,7 +1398,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
 
       {sheetTab === 'combat' && (
         <div className="space-y-3">
-          <SessionCombatPanel session={session} maxHp={effectiveMaxHp} onChange={setSession} />
+          <SessionCombatPanel session={session} maxHp={effectiveMaxHp} equippedShield={equippedShield} onChange={setSession} />
 
           <StrikesView
             strikes={strikes}

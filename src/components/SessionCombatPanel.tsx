@@ -6,6 +6,7 @@ import { Heart, Shield, Sparkles, Skull, AlertTriangle } from 'lucide-react';
 interface SessionCombatPanelProps {
   session: SessionState;
   maxHp: number;
+  equippedShield?: { name: string; acBonus: number } | null;
   onChange: (next: SessionState) => void;
 }
 
@@ -18,10 +19,12 @@ const VALUE_CONDITIONS: readonly (keyof Omit<SessionState['conditions'], 'offGua
   'slowed',
 ];
 
-export const SessionCombatPanel: React.FC<SessionCombatPanelProps> = ({ session, maxHp, onChange }) => {
+export const SessionCombatPanel: React.FC<SessionCombatPanelProps> = ({ session, maxHp, equippedShield, onChange }) => {
   const { t } = useI18n();
   const currentHp = session.currentHp ?? maxHp;
   const hpPct = maxHp > 0 ? Math.min(100, Math.max(0, (currentHp / maxHp) * 100)) : 0;
+  const hasShield = Boolean(equippedShield);
+  const shieldActive = hasShield && session.shieldRaised;
 
   return (
     <div className="bg-surface border border-border-strong rounded-2xl p-4 shadow-xl space-y-4">
@@ -33,16 +36,21 @@ export const SessionCombatPanel: React.FC<SessionCombatPanelProps> = ({ session,
 
         <button
           type="button"
+          disabled={!hasShield}
+          title={hasShield ? `${equippedShield!.name} (+${equippedShield!.acBonus} ${t('common.ac')})` : t('session.needEquippedShield')}
           onClick={() => onChange({ ...session, shieldRaised: !session.shieldRaised })}
-          aria-pressed={session.shieldRaised}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
-            session.shieldRaised
+          aria-pressed={shieldActive}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors disabled:opacity-45 disabled:cursor-not-allowed ${
+            shieldActive
               ? 'bg-status-info-bg text-status-info border-status-info-border'
               : 'bg-elevated hover:bg-control text-text-secondary border-border-strong'
           }`}
         >
           <Shield className="w-3.5 h-3.5" />
-          <span>{session.shieldRaised ? t('session.shieldRaised') : t('session.raiseShield')}</span>
+          <span>
+            {shieldActive ? t('session.shieldRaised') : t('session.raiseShield')}
+            {equippedShield ? ` (+${equippedShield.acBonus} ${t('common.ac')})` : ''}
+          </span>
         </button>
       </div>
 

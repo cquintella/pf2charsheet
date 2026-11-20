@@ -700,5 +700,8 @@ export const ptBR = {
   'companion.remove': 'Remover companheiro',
   'sheet.exportPdf': 'Exportar PDF preenchível',
   'sheet.exportPdfError': 'Não foi possível gerar o PDF da ficha.',
+  'sheet.visionRange': 'Alcance da visão',
+  'sheet.visionRangePlaceholder': 'Alcance (ex.: 18m)',
+  'session.needEquippedShield': 'Equipe um escudo no inventário para habilitar Erguer Escudo.',
   // @end
 };
