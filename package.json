@@ -15,6 +15,7 @@
     "postinstall": "node scripts/install-db.cjs",
     "db:init": "node scripts/init-db.cjs",
     "db:import-foundry": "node scripts/import-foundry.cjs",
+    "db:import-animals": "node scripts/import-animals.cjs",
     "dist:prepare": "node scripts/prepare-clean-db.mjs && npm run build",
     "dist:all": "npm run dist:prepare && electron-builder --mac --win --linux --x64 --arm64"
   },

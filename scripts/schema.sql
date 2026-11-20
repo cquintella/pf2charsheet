@@ -164,3 +164,35 @@ CREATE TABLE IF NOT EXISTS spellbooks (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_spellbooks_updated ON spellbooks(updated_at);
+CREATE TABLE IF NOT EXISTS animals (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  slug TEXT,
+  level INTEGER DEFAULT 0,
+  size TEXT,
+  traits TEXT,
+  rarity TEXT DEFAULT 'common',
+  hp INTEGER DEFAULT 0,
+  ac INTEGER DEFAULT 10,
+  fortitude INTEGER DEFAULT 0,
+  reflex INTEGER DEFAULT 0,
+  will INTEGER DEFAULT 0,
+  perception INTEGER DEFAULT 0,
+  speed INTEGER DEFAULT 25,
+  senses TEXT,
+  img TEXT,
+  source TEXT,
+  description TEXT,
+  system_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_animals_level ON animals(level);
+CREATE TABLE IF NOT EXISTS familiar_abilities (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  slug TEXT,
+  category TEXT,
+  traits TEXT,
+  description TEXT,
+  img TEXT,
+  system_json TEXT NOT NULL
+);
