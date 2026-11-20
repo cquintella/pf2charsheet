@@ -1,0 +1,13 @@
+node_modules/
+dist/
+build/
+build-resources/
+pf2e.db
+pf2e.db-*
+*.db-wal
+*.db-shm
+cookies.txt
+.env
+.env.*
+.DS_Store
+public/portraits

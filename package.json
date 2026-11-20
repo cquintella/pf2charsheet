@@ -1,0 +1,116 @@
+{
+  "name": "pf2charsheet",
+  "version": "1.0.0",
+  "description": "Pathbuilder 2e Desktop Clone powered by Electron, SQLite and Foundry PF2e data",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "electron:dev": "concurrently -k \"vite\" \"cross-env WAIT_ON_WEB=true electron .\"",
+    "start": "electron .",
+    "db:populate-spells": "node scripts/populate_spells_aon.cjs",
+    "postinstall": "node scripts/install-db.cjs",
+    "db:init": "node scripts/init-db.cjs",
+    "db:import-foundry": "node scripts/import-foundry.cjs",
+    "dist:prepare": "node scripts/prepare-clean-db.mjs && npm run build",
+    "dist:all": "npm run dist:prepare && electron-builder --mac --win --linux --x64 --arm64"
+  },
+  "build": {
+    "appId": "com.pf2charsheet.app",
+    "productName": "PF2e Manager",
+    "directories": {
+      "output": "build"
+    },
+    "asarUnpack": [
+      "node_modules/sql.js/dist/sql-wasm.wasm"
+    ],
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "!pf2e.db",
+      "!build-resources/**/*",
+      "!build/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "build-resources/pf2e.db",
+        "to": "pf2e.db"
+      }
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.games"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "tar.gz",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Game"
+    }
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.3.0",
+    "lucide-react": "^1.16.0",
+    "pdf-lib": "^1.17.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sql.js": "^1.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^33.0.0",
+    "electron-builder": "^26.18.0",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.6"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
