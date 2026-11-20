@@ -1936,16 +1936,16 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                 return (
                   <div
                     key={s}
-                    className="flex items-center justify-between p-2 rounded-lg bg-inset hover:bg-surface border border-border-subtle text-xs transition-colors"
+                    className="flex items-center justify-between gap-2 p-2 rounded-lg bg-inset hover:bg-surface border border-border-subtle text-xs transition-colors"
                   >
-                    <div className="flex items-center space-x-2">
-                      <span className="font-semibold text-white">{skillName(t, s)}</span>
-                      <span className="text-[11px] text-text-muted uppercase">({attributeShort(t, info.attribute)})</span>
+                    <div className="flex items-center space-x-1.5 min-w-0 flex-1">
+                      <span className="font-semibold text-white truncate">{skillName(t, s)}</span>
+                      <span className="text-[11px] text-text-muted uppercase flex-shrink-0">({attributeShort(t, info.attribute)})</span>
                     </div>
 
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center space-x-2 flex-shrink-0">
                       <ProficiencySelector label={t('sheet.proficiencyIn', { skill: skillName(t, s) })} value={rank} onChange={value => setSkillRank(inspectLevel, s, value)} />
-                      <span className="font-black text-sm text-white w-8 text-right">
+                      <span className="font-black text-sm text-white w-7 text-right tabular-nums">
                         {total >= 0 ? `+${total}` : total}
                       </span>
                     </div>
