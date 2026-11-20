@@ -50,9 +50,9 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onDone, durationMs =
             >
               https://github.com/cquintella/pf2charsheet
             </a>
-            <div className="pt-1 space-y-0.5 text-[11px] text-text-secondary">
-              <p>Apoie com R$ 10 — <strong className="text-white">PIX:</strong> caquintella@gmail.com</p>
-              <p>Support with $2 — <strong className="text-white">PayPal:</strong> caquintella@gmail.com</p>
+            <div className="mt-1.5 inline-block bg-white/95 text-slate-900 rounded-xl px-3.5 py-2 shadow-md border border-white space-y-0.5 text-[11px] font-medium">
+              <p>Apoie com R$ 10 — <strong className="font-black text-slate-950">PIX:</strong> caquintella@gmail.com</p>
+              <p>Support with $2 — <strong className="font-black text-slate-950">PayPal:</strong> caquintella@gmail.com</p>
             </div>
           </div>
 
