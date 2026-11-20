@@ -687,20 +687,20 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
                     key={ancestry.id}
                     type="button"
                     onClick={() => handleSelectAncestry(ancestry)}
-                    className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center gap-3 text-left ${
+                    className={`p-3 rounded-xl border cursor-pointer transition-all flex flex-col items-center justify-between gap-2.5 text-center ${
                       isSelected
                         ? 'bg-elevated border-accent ring-1 ring-accent shadow-lg'
                         : 'bg-surface border-border-strong hover:bg-elevated'
                     }`}
                   >
+                    <span className="font-bold text-white text-xs sm:text-sm leading-snug break-words w-full">
+                      {ancestry.name}
+                    </span>
                     <img
                       src={resolvePf2eIcon(ancestry.img, '/assets/icons/default-icons/mystery-man.svg')}
                       alt={ancestry.name}
-                      className="w-11 h-11 rounded-lg object-contain bg-canvas border border-border-strong p-1 flex-shrink-0"
+                      className="w-14 h-14 rounded-xl object-contain bg-canvas border border-border-strong p-1 flex-shrink-0"
                     />
-                    <span className="font-bold text-white text-sm truncate flex-1">
-                      {ancestry.name}
-                    </span>
                   </button>
                 );
               })}
