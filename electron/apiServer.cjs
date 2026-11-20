@@ -83,13 +83,26 @@ function createDbAdapter(sqlDb, dbPath) {
   };
 }
 
+const MAX_JSON_BODY_BYTES = 5 * 1024 * 1024;
+
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
+    let bytes = 0;
+    let aborted = false;
     req.on('data', (chunk) => {
+      if (aborted) return;
+      bytes += chunk.length;
+      if (bytes > MAX_JSON_BODY_BYTES) {
+        aborted = true;
+        reject(new Error('Payload too large'));
+        req.destroy();
+        return;
+      }
       body += chunk;
     });
     req.on('end', () => {
+      if (aborted) return;
       try {
         resolve(body ? JSON.parse(body) : {});
       } catch (err) {
@@ -202,8 +215,18 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
               const dataJson = typeof data.data === 'string' ? data.data : JSON.stringify(data.data || {});
 
               db.prepare(`
-                INSERT OR REPLACE INTO characters (id, name, level, ancestry, heritage, background, class, subclass, data_json, updated_at)
+                INSERT INTO characters (id, name, level, ancestry, heritage, background, class, subclass, data_json, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(id) DO UPDATE SET
+                  name = excluded.name,
+                  level = excluded.level,
+                  ancestry = excluded.ancestry,
+                  heritage = excluded.heritage,
+                  background = excluded.background,
+                  class = excluded.class,
+                  subclass = excluded.subclass,
+                  data_json = excluded.data_json,
+                  updated_at = CURRENT_TIMESTAMP
               `).run(id, name, level, ancestry, heritage, background, className, subclass, dataJson);
 
               return sendJson(res, { success: true, id });
@@ -429,8 +452,8 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
         const trait = query.trait;
         const rarity = query.rarity;
         const ids = query.ids;
-        const limit = parseInt(String(query.limit || '60'), 10);
-        const offset = parseInt(String(query.offset || '0'), 10);
+        const limit = Math.min(200, Math.max(1, parseInt(String(query.limit || '60'), 10) || 60));
+        const offset = Math.max(0, parseInt(String(query.offset || '0'), 10) || 0);
 
         const conditions = [];
         const params = [];
@@ -632,8 +655,8 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
         const trait = query.trait;
         const rarity = query.rarity;
         const ids = query.ids;
-        const limit = parseInt(String(query.limit || '60'), 10);
-        const offset = parseInt(String(query.offset || '0'), 10);
+        const limit = Math.min(200, Math.max(1, parseInt(String(query.limit || '60'), 10) || 60));
+        const offset = Math.max(0, parseInt(String(query.offset || '0'), 10) || 0);
 
         const conditions = [];
         const params = [];

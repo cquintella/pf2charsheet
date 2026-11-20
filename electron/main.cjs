@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { startLocalServer } = require('./apiServer.cjs');
@@ -61,6 +61,18 @@ async function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
     ipcMain.removeAllListeners('allow-close');
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://') || url.startsWith('http://')) {
+      void shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith(targetUrl)) {
+      event.preventDefault();
+    }
   });
 
   await mainWindow.loadURL(targetUrl);

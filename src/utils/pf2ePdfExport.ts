@@ -29,6 +29,7 @@ export interface PdfExportPayload {
   maxHp: number;
   ac: number;
   acProfRank: ProficiencyRank;
+  acItemBonus: number;
   fortitude: { total: number; profRank: ProficiencyRank };
   reflex: { total: number; profRank: ProficiencyRank };
   will: { total: number; profRank: ProficiencyRank };
@@ -161,6 +162,7 @@ export async function exportCharacterToFillablePdf(data: PdfExportPayload): Prom
   setText('AC', data.ac);
   setText('AC DEX Mod', signedStr(data.attributes.dex));
   setText('AC PROF', signedStr(acProfBonus));
+  setText('AC ITEM', signedStr(data.acItemBonus));
   checkRankBoxes('AC', data.acProfRank);
 
   const setSave = (

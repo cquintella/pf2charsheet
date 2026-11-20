@@ -489,8 +489,8 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
 
     const hasToughness = toughnessCount > 0;
     const hasDiehard = diehardCount > 0;
-    // Each resilience feat awards +1 HP per level
-    const bonusPerLevel = (hasToughness ? 1 : 0) + (hasDiehard ? 1 : 0);
+    // Toughness awards +1 HP per level; Diehard only raises the dying threshold
+    const bonusPerLevel = hasToughness ? 1 : 0;
 
     return {
       hasToughness,
@@ -856,14 +856,23 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     }
   };
 
+  const pendingLevelSave = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pendingLevelSave.current || loading) return;
+    const msg = pendingLevelSave.current;
+    pendingLevelSave.current = null;
+    void handleSaveProgress().then((ok) => {
+      if (ok) setSaveMsg(msg);
+    });
+  }, [currentLevel, levelData, loading]);
+
   // Passar de Nível (+1 Nível Oficial)
   const handleLevelUp = async () => {
     if (currentLevel >= 20) return;
     const nextLvl = currentLevel + 1;
+    pendingLevelSave.current = t('sheet.levelUpMsg', { name: charName, level: nextLvl });
     setCurrentLevel(nextLvl);
     setInspectLevel(nextLvl);
-    setSaveMsg(t('sheet.levelUpMsg', { name: charName, level: nextLvl }));
-    handleSaveProgress(nextLvl);
   };
 
   // Descer Nível (-1 Nível Oficial): remove escolhas do nível desfeito
@@ -871,6 +880,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     if (currentLevel <= 1) return;
     const removedLevel = currentLevel;
     const prevLvl = currentLevel - 1;
+    pendingLevelSave.current = t('sheet.levelDownMsg', { name: charName, level: prevLvl });
     setLevelData(prev => ({
       ...prev,
       [removedLevel]: {
@@ -882,16 +892,13 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     }));
     setCurrentLevel(prevLvl);
     setInspectLevel(prevLvl);
-    setSaveMsg(t('sheet.levelDownMsg', { name: charName, level: prevLvl }));
-    handleSaveProgress(prevLvl);
   };
 
   // Set Official Level to a target level
   const handleSetOfficialLevel = async (targetLvl: number) => {
+    pendingLevelSave.current = t('sheet.officialLevelMsg', { name: charName, level: targetLvl });
     setCurrentLevel(targetLvl);
     setInspectLevel(targetLvl);
-    setSaveMsg(t('sheet.officialLevelMsg', { name: charName, level: targetLvl }));
-    handleSaveProgress(targetLvl);
   };
 
   // Render Grouped Feats for a Category in Consolidated View
@@ -1035,9 +1042,15 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
   const handleExportPdf = async () => {
     try {
       let acProfRank: ProficiencyRank = 1;
+      let acItemBonus = 0;
       try {
         const armor = inventory.items.find((entry) => entry.equipped && entry.item.item_type === 'armor');
-        const category = armor ? (JSON.parse(armor.item.system_json || '{}').category || 'unarmored') : 'unarmored';
+        let category = 'unarmored';
+        if (armor) {
+          const armorSys = JSON.parse(armor.item.system_json || '{}') as { category?: string; acBonus?: number; runes?: { potency?: number } };
+          if (armorSys.category) category = armorSys.category;
+          acItemBonus = (typeof armorSys.acBonus === 'number' ? armorSys.acBonus : 0) + (typeof armorSys.runes?.potency === 'number' ? armorSys.runes.potency : 0);
+        }
         const defenses = JSON.parse(selectedClass?.defenses || '{}') as Record<string, unknown>;
         const raw = defenses[category];
         if (typeof raw === 'number' && raw >= 0 && raw <= 4) acProfRank = raw as ProficiencyRank;
@@ -1055,6 +1068,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
         maxHp: effectiveMaxHp,
         ac: effectiveCombatStats.ac,
         acProfRank,
+        acItemBonus,
         fortitude: {
           total: effectiveCombatStats.fortitude,
           profRank: (selectedClass?.fortitude || 1) as ProficiencyRank,
@@ -1593,7 +1607,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                   </span>
                 </h3>
                 <p className="text-xs text-text-secondary mt-0.5">
-                  {t('sheet.hpGained')} <strong className="text-white">+{hpStats.perLevelHp} {t('common.hp')}</strong> ({t('sheet.hpBreakdown', { classHp: hpStats.classHp, con: signed(hpStats.conMod), conShort: attributeShort(t, 'con') })}{hpBonusInfo.hasToughness ? ` + 1 ${t('sheet.toughness')}` : ''}{hpBonusInfo.hasDiehard ? ` + 1 ${t('sheet.diehard')}` : ''}).
+                  {t('sheet.hpGained')} <strong className="text-white">+{hpStats.perLevelHp} {t('common.hp')}</strong> ({t('sheet.hpBreakdown', { classHp: hpStats.classHp, con: signed(hpStats.conMod), conShort: attributeShort(t, 'con') })}{hpBonusInfo.hasToughness ? ` + 1 ${t('sheet.toughness')}` : ''}).
                 </p>
               </div>
 

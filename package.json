@@ -5,7 +5,8 @@
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev-app.mjs",
+    "dev:web": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "electron:dev": "concurrently -k \"vite\" \"cross-env WAIT_ON_WEB=true electron .\"",

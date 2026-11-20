@@ -124,8 +124,18 @@ function sqlitePlugin() {
                 const dataJson = typeof data.data === 'string' ? data.data : JSON.stringify(data.data || {});
 
                 db.prepare(`
-                  INSERT OR REPLACE INTO characters (id, name, level, ancestry, heritage, background, class, subclass, data_json, updated_at)
+                  INSERT INTO characters (id, name, level, ancestry, heritage, background, class, subclass, data_json, updated_at)
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                  ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    level = excluded.level,
+                    ancestry = excluded.ancestry,
+                    heritage = excluded.heritage,
+                    background = excluded.background,
+                    class = excluded.class,
+                    subclass = excluded.subclass,
+                    data_json = excluded.data_json,
+                    updated_at = CURRENT_TIMESTAMP
                 `).run(id, name, level, ancestry, heritage, background, className, subclass, dataJson);
 
                 res.setHeader('Content-Type', 'application/json');
@@ -392,8 +402,8 @@ function sqlitePlugin() {
             const trait = query.trait as string;
             const rarity = query.rarity as string;
             const ids = query.ids as string;
-            const limit = parseInt(query.limit as string || '60', 10);
-            const offset = parseInt(query.offset as string || '0', 10);
+            const limit = Math.min(200, Math.max(1, parseInt(query.limit as string || '60', 10) || 60));
+            const offset = Math.max(0, parseInt(query.offset as string || '0', 10) || 0);
 
             const conditions: string[] = [];
             const params: any[] = [];
@@ -597,8 +607,8 @@ function sqlitePlugin() {
             const trait = query.trait as string;
             const rarity = query.rarity as string;
             const ids = query.ids as string;
-            const limit = parseInt(query.limit as string || '60', 10);
-            const offset = parseInt(query.offset as string || '0', 10);
+            const limit = Math.min(200, Math.max(1, parseInt(query.limit as string || '60', 10) || 60));
+            const offset = Math.max(0, parseInt(query.offset as string || '0', 10) || 0);
 
             const conditions: string[] = [];
             const params: any[] = [];
