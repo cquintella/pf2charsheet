@@ -1183,11 +1183,6 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
               icon={<Save className="w-4 h-4 text-accent-text" />}
             />
             <IconButton
-              onClick={() => window.print()}
-              label={t('sheet.print')}
-              icon={<Printer className="w-4 h-4 text-accent-text" />}
-            />
-            <IconButton
               onClick={handleExportPdf}
               label={t('sheet.exportPdf')}
               icon={<FileDown className="w-4 h-4 text-accent-text" />}
