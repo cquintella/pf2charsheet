@@ -1,3 +1,5 @@
+![PF2ECharSheet](docs/banner.jpg)
+
 # Pathfinder Character Manager 2eR
 
 ## Instalação para desenvolvimento
