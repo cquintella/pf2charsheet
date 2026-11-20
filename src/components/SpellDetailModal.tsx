@@ -6,6 +6,7 @@ import { IconPickerModal } from './IconPickerModal';
 import { useI18n } from '../i18n/I18nContext';
 import { rarityLabel } from '../i18n/gameTerms';
 import { cleanDescriptionHtml } from '../utils/formatters';
+import { buildSpellFormulaContext } from '../utils/foundryFormula';
 import { useModalFocus, clickableProps } from '../utils/useModalFocus';
 import { X, Shield, Clock, Crosshair, Hourglass, BookOpen, Layers, Star, Camera, Scroll } from 'lucide-react';
 
@@ -17,6 +18,7 @@ interface SpellDetailModalProps {
   onClose: () => void;
   onSelectTrait?: (trait: string) => void;
   inline?: boolean;
+  characterLevel?: number;
 }
 
 export const SpellDetailModal: React.FC<SpellDetailModalProps> = ({ 
@@ -26,7 +28,8 @@ export const SpellDetailModal: React.FC<SpellDetailModalProps> = ({
   onUpdateSpellIcon,
   onClose, 
   onSelectTrait,
-  inline = false
+  inline = false,
+  characterLevel
 }) => {
   const { t } = useI18n();
   const [showIconPicker, setShowIconPicker] = useState<boolean>(false);
@@ -293,7 +296,7 @@ export const SpellDetailModal: React.FC<SpellDetailModalProps> = ({
               </h3>
               <div 
                 className="pf-prose max-w-none text-base leading-relaxed text-text-primary space-y-3 bg-canvas p-4 rounded-lg border border-border-strong"
-                dangerouslySetInnerHTML={{ __html: cleanDescriptionHtml(spell.description) }}
+                dangerouslySetInnerHTML={{ __html: cleanDescriptionHtml(spell.description, buildSpellFormulaContext(spell, characterLevel)) }}
               />
             </div>
           </div>

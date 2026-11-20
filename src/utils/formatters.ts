@@ -81,22 +81,18 @@ export function resolvePf2eIcon(img: string | undefined, defaultIcon: string = '
     .replace(/^icons\//, '/assets/icons/');
 }
 
-export function cleanDescriptionHtml(html: string): string {
+import { FormulaContext, formatFoundryInlineTokens } from './foundryFormula';
+
+export function cleanDescriptionHtml(html: string, ctx: FormulaContext = {}): string {
   if (!html) return '';
-  return html
-    .replace(/@UUID\[[^\]]+\]\{([^}]+)\}/g, '<strong class="text-accent-text">$1</strong>')
-    .replace(/@Damage\[[^\]]+\]\{([^}]+)\}/g, '<strong class="text-status-danger">$1</strong>')
-    .replace(/@Check\[[^\]]+\]\{([^}]+)\}/g, '<strong class="text-status-info">$1</strong>');
+  return formatFoundryInlineTokens(html, ctx, true);
 }
 
-export function cleanSnippetText(html: string): string {
+export function cleanSnippetText(html: string, ctx: FormulaContext = {}): string {
   if (!html) return '';
-  return html
+  return formatFoundryInlineTokens(html, ctx, false)
     .replace(/<hr\s*\/?>/gi, ' — ')
     .replace(/<[^>]*>?/gm, '')
-    .replace(/@UUID\[[^\]]+\]\{([^}]+)\}/g, '$1')
-    .replace(/@Damage\[[^\]]+\]\{([^}]+)\}/g, '$1')
-    .replace(/@Check\[[^\]]+\]\{([^}]+)\}/g, '$1')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .trim();

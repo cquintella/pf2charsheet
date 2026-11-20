@@ -1026,6 +1026,7 @@ export const App: React.FC = () => {
                       onToggleFavorite={() => toggleFavorite(spell.id)}
                       onClick={() => setSelectedSpell(spell)}
                       onSelectTrait={handleSelectTrait}
+                      characterLevel={activeCharacter?.level}
                     />
                   ))}
                 </div>
@@ -1114,6 +1115,7 @@ export const App: React.FC = () => {
           onUpdateSpellIcon={handleUpdateSpellIcon}
           onClose={() => setSelectedSpell(null)}
           onSelectTrait={handleSelectTrait}
+          characterLevel={activeCharacter?.level}
         />
       )}
     </div>

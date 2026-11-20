@@ -1,6 +1,7 @@
 import React from 'react';
 import { SpellItem } from '../types/pf2e';
-import { resolveSpellIcon } from '../utils/formatters';
+import { resolveSpellIcon, cleanSnippetText } from '../utils/formatters';
+import { buildSpellFormulaContext } from '../utils/foundryFormula';
 import { 
   Shield, 
   Clock, 
@@ -21,6 +22,7 @@ interface SpellCardProps {
   onToggleFavorite: (e: React.MouseEvent) => void;
   onClick: () => void;
   onSelectTrait?: (trait: string) => void;
+  characterLevel?: number;
 }
 
 export const SpellCard: React.FC<SpellCardProps> = ({ 
@@ -28,7 +30,8 @@ export const SpellCard: React.FC<SpellCardProps> = ({
   isFavorite,
   onToggleFavorite,
   onClick, 
-  onSelectTrait 
+  onSelectTrait,
+  characterLevel
 }) => {
   const { t } = useI18n();
   let traits: string[] = [];
@@ -143,12 +146,7 @@ export const SpellCard: React.FC<SpellCardProps> = ({
 
   const cleanSnippet = (html: string) => {
     if (!html) return '';
-    const clean = html
-      .replace(/<hr\s*\/?>/gi, ' — ')
-      .replace(/<[^>]*>?/gm, '')
-      .replace(/@UUID\[[^\]]+\]\{([^}]+)\}/g, '$1')
-      .replace(/@Damage\[[^\]]+\]\{([^}]+)\}/g, '$1')
-      .replace(/@Check\[[^\]]+\]\{([^}]+)\}/g, '$1');
+    const clean = cleanSnippetText(html, buildSpellFormulaContext(spell, characterLevel));
     return clean.slice(0, 320) + (clean.length > 320 ? '...' : '');
   };
 
