@@ -42,6 +42,95 @@ export function resolvePortraitSrc(src: string | undefined): string | undefined 
   return src;
 }
 
+/** Reads an image File into a data URL without resizing, for interactive cropping. */
+export function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Failed to read image file.'));
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Computes clamped pan limits and rendered dimensions for a square crop viewport.
+ * At zoom = 1, the image covers the viewport (like CSS object-fit: cover).
+ */
+export function getPortraitCropMetrics(
+  naturalWidth: number,
+  naturalHeight: number,
+  viewportSize: number,
+  zoom: number,
+  panX: number,
+  panY: number
+) {
+  const safeW = Math.max(1, naturalWidth);
+  const safeH = Math.max(1, naturalHeight);
+  const baseScale = Math.max(viewportSize / safeW, viewportSize / safeH);
+  const totalScale = baseScale * Math.max(1, zoom);
+  const dispW = safeW * totalScale;
+  const dispH = safeH * totalScale;
+  const maxPanX = Math.max(0, (dispW - viewportSize) / 2);
+  const maxPanY = Math.max(0, (dispH - viewportSize) / 2);
+  const clampedX = Math.max(-maxPanX, Math.min(maxPanX, panX));
+  const clampedY = Math.max(-maxPanY, Math.min(maxPanY, panY));
+  const imgLeft = viewportSize / 2 + clampedX - dispW / 2;
+  const imgTop = viewportSize / 2 + clampedY - dispH / 2;
+
+  return {
+    totalScale,
+    dispW,
+    dispH,
+    maxPanX,
+    maxPanY,
+    panX: clampedX,
+    panY: clampedY,
+    imgLeft,
+    imgTop,
+  };
+}
+
+/** Renders the zoomed and panned square portrait region to a compact WebP/JPEG data URL. */
+export function cropPortraitToSquare(
+  src: string,
+  viewportSize: number,
+  zoom: number,
+  panX: number,
+  panY: number,
+  outputSize = 256
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onerror = () => reject(new Error('Invalid image source.'));
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = outputSize;
+      canvas.height = outputSize;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Canvas context unavailable.'));
+        return;
+      }
+      const m = getPortraitCropMetrics(
+        img.naturalWidth || img.width,
+        img.naturalHeight || img.height,
+        viewportSize,
+        zoom,
+        panX,
+        panY
+      );
+      const sx = Math.max(0, -m.imgLeft / m.totalScale);
+      const sy = Math.max(0, -m.imgTop / m.totalScale);
+      const sSide = viewportSize / m.totalScale;
+      ctx.drawImage(img, sx, sy, sSide, sSide, 0, 0, outputSize, outputSize);
+      const webp = canvas.toDataURL('image/webp', 0.85);
+      resolve(webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.src = src;
+  });
+}
+
 /** Resizes and center-crops an uploaded image file to a compact square data URL. */
 export function compressPortraitFile(file: File, size = 256): Promise<string> {
   return new Promise((resolve, reject) => {
