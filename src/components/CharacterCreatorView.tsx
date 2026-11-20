@@ -689,7 +689,7 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
                     onClick={() => handleSelectAncestry(ancestry)}
                     className={`p-3 rounded-xl border cursor-pointer transition-all flex flex-col items-center justify-between gap-2.5 text-center ${
                       isSelected
-                        ? 'bg-elevated border-accent ring-1 ring-accent shadow-lg'
+                        ? 'bg-status-info-bg/30 border-status-info ring-1 ring-status-info shadow-lg'
                         : 'bg-surface border-border-strong hover:bg-elevated'
                     }`}
                   >
@@ -699,7 +699,7 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
                     <img
                       src={resolvePf2eIcon(ancestry.img, '/assets/icons/default-icons/mystery-man.svg')}
                       alt={ancestry.name}
-                      className="w-4/5 aspect-square rounded-xl object-contain bg-canvas border border-border-strong p-1.5 flex-shrink-0"
+                      className="w-[90%] aspect-square rounded-xl object-contain bg-canvas border border-border-strong p-1.5 flex-shrink-0"
                     />
                   </button>
                 );
