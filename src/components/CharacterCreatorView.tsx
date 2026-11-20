@@ -678,50 +678,30 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
               </select>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[580px] overflow-y-auto pr-1">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[580px] overflow-y-auto pr-1">
               {filteredAncestries.map(ancestry => {
                 const isSelected = charState.ancestry?.id === ancestry.id;
-                let parsedTraits: string[] = [];
-                try { parsedTraits = JSON.parse(ancestry.traits || '[]'); } catch (e) {}
 
                 return (
-                  <div
+                  <button
                     key={ancestry.id}
+                    type="button"
                     onClick={() => handleSelectAncestry(ancestry)}
-                    className={`p-3 rounded-xl border cursor-pointer transition-all flex items-start space-x-3 ${
+                    className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center gap-3 text-left ${
                       isSelected
                         ? 'bg-elevated border-accent ring-1 ring-accent shadow-lg'
-                        : 'bg-surface border-border-strong hover:border-border-strong hover:bg-elevated'
+                        : 'bg-surface border-border-strong hover:bg-elevated'
                     }`}
                   >
                     <img
                       src={resolvePf2eIcon(ancestry.img, '/assets/icons/default-icons/mystery-man.svg')}
                       alt={ancestry.name}
-                      className="w-12 h-12 rounded-lg object-contain bg-canvas border border-border-strong p-1 flex-shrink-0"
+                      className="w-11 h-11 rounded-lg object-contain bg-canvas border border-border-strong p-1 flex-shrink-0"
                     />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-bold text-white text-sm truncate">{ancestry.name}</h4>
-                        <span className="text-[11px] uppercase font-bold px-1.5 py-0.5 rounded bg-elevated text-status-info">
-                          {rarityLabel(t, ancestry.rarity)}
-                        </span>
-                      </div>
-                      <div className="flex items-center space-x-2 text-xs text-text-secondary mt-1">
-                        <span>{ancestry.hp} {t('common.hp')}</span>
-                        <span>•</span>
-                        <span>{t('common.feet', { value: ancestry.speed })}</span>
-                        <span>•</span>
-                        <span className="capitalize">{sizeLabel(ancestry.size)}</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {parsedTraits.slice(0, 3).map(tr => (
-                          <span key={tr} className="text-[11px] bg-elevated text-text-secondary px-1.5 py-0.5 rounded border border-border-strong">
-                            {tr}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
+                    <span className="font-bold text-white text-sm truncate flex-1">
+                      {ancestry.name}
+                    </span>
+                  </button>
                 );
               })}
             </div>
