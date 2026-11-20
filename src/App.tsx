@@ -27,6 +27,7 @@ import { EquipmentExplorerView } from './components/EquipmentExplorerView';
 import { FeatExplorerView } from './components/FeatExplorerView';
 import { SettingsModal, ThemeName } from './components/SettingsModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { SplashScreen } from './components/SplashScreen';
 import { useI18n } from './i18n/I18nContext';
 import { clickableProps } from './utils/useModalFocus';
 import { getCharacterPortrait, getSelectedPortraitDb, PortraitDbSource, resolvePortraitSrc, setSelectedPortraitDb } from './utils/portrait';
@@ -75,6 +76,8 @@ const INITIAL_FILTERS: SpellFilters = {
 export const App: React.FC = () => {
   const { t, locale, translator } = useI18n();
   const [showSettings, setShowSettings] = useState(false);
+  const [showSplash, setShowSplash] = useState(true);
+  const handleSplashDone = useCallback(() => setShowSplash(false), []);
   const [activeTab, setActiveTabValue] = useState<'creator' | 'levels' | 'catalog' | 'feats' | 'items' | 'spellbooks'>('levels');
   const [theme, setTheme] = useState<ThemeName>(() => {
     try { const value = localStorage.getItem('pf2e_theme'); return value === 'light' || value === 'dark' ? value : 'current'; } catch { return 'current'; }
@@ -1083,6 +1086,7 @@ export const App: React.FC = () => {
         </div>
       </div>}
 
+      {showSplash && <SplashScreen onDone={handleSplashDone} />}
       {showSettings && <SettingsModal theme={theme} onThemeChange={setTheme} portraitDb={portraitDb} onPortraitDbChange={setPortraitDb} onClose={() => setShowSettings(false)} />}
 
       {confirmDeleteChar && (
