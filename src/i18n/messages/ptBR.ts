@@ -703,5 +703,6 @@ export const ptBR = {
   'sheet.visionRange': 'Alcance da visão',
   'sheet.visionRangePlaceholder': 'Alcance (ex.: 18m)',
   'session.needEquippedShield': 'Equipe um escudo no inventário para habilitar Erguer Escudo.',
+  'picker.allAncestries': 'Genéricos / Heranças Versáteis',
   // @end
 };

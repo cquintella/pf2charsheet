@@ -39,6 +39,7 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
   const requirementText = (result: RequirementResult): string => result.unreadable ? t('picker.unreadable') : result.text;
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<string>(slotCategory === 'archetype' ? 'all' : slotCategory);
+  const [ancestryScope, setAncestryScope] = useState<'character' | 'all'>('character');
   const [limit, setLimit] = useState(60);
   const [feats, setFeats] = useState<FeatItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -59,9 +60,13 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
     let active = true;
     setLoading(true);
 
-    // When category is ancestry, strictly lock trait to character's chosen ancestry
+    // When category is ancestry and scoped to character ancestry, lock trait; otherwise show all ancestry/versatile heritage feats
     const isAncestry = category === 'ancestry';
-    const effectiveTrait = slotCategory === 'archetype' ? 'archetype' : (isAncestry && ancestryTrait) ? ancestryTrait : 'all';
+    const effectiveTrait = slotCategory === 'archetype'
+      ? 'archetype'
+      : (isAncestry && ancestryTrait && ancestryScope === 'character')
+        ? ancestryTrait
+        : 'all';
 
     const filters: FeatFilters = {
       search,
@@ -93,7 +98,7 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
     return () => {
       active = false;
     };
-  }, [search, category, maxLevel, ancestryTrait, slotCategory, limit]);
+  }, [search, category, maxLevel, ancestryTrait, ancestryScope, slotCategory, limit]);
 
   const selectFeat = (feat: FeatItem) => {
     let traits: string[] = [];
@@ -213,10 +218,31 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
             {slotCategory === 'archetype' ? (
               <span className="px-3 py-1.5 rounded-lg bg-accent text-black font-bold">{t('picker.archetypeFeats')}</span>
             ) : slotCategory === 'ancestry' ? (
-              <span className="px-3 py-1.5 rounded-lg bg-accent text-black font-bold flex items-center gap-1.5 shadow">
-                <Award className="w-3.5 h-3.5" />
-                <span>{t('picker.featsOf', { ancestry: ancestryName || t('common.ancestry') })}</span>
-              </span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => { setAncestryScope('character'); setLimit(60); }}
+                  className={`px-3 py-1.5 rounded-lg font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                    ancestryScope === 'character'
+                      ? 'bg-accent text-black shadow'
+                      : 'bg-elevated text-text-secondary hover:text-white border border-border-strong'
+                  }`}
+                >
+                  <Award className="w-3.5 h-3.5" />
+                  <span>{t('picker.featsOf', { ancestry: ancestryName || t('common.ancestry') })}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAncestryScope('all'); setLimit(60); }}
+                  className={`px-3 py-1.5 rounded-lg font-semibold transition-all whitespace-nowrap ${
+                    ancestryScope === 'all'
+                      ? 'bg-accent text-black shadow'
+                      : 'bg-elevated text-text-secondary hover:text-white border border-border-strong'
+                  }`}
+                >
+                  {t('picker.allAncestries')}
+                </button>
+              </div>
             ) : (
               [
                 { id: slotCategory, label: t('picker.defaultCategory', { category: slotCategory }) },

@@ -701,5 +701,6 @@ export const en: Record<keyof typeof ptBR, string> = {
   'sheet.visionRange': 'Vision range',
   'sheet.visionRangePlaceholder': 'Range (e.g., 60 ft.)',
   'session.needEquippedShield': 'Equip a shield in your inventory to enable Raise Shield.',
+  'picker.allAncestries': 'Generic / Versatile Heritages',
   // @end
 };
