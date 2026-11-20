@@ -699,7 +699,7 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
                     <img
                       src={resolvePf2eIcon(ancestry.img, '/assets/icons/default-icons/mystery-man.svg')}
                       alt={ancestry.name}
-                      className="w-14 h-14 rounded-xl object-contain bg-canvas border border-border-strong p-1 flex-shrink-0"
+                      className="w-4/5 aspect-square rounded-xl object-contain bg-canvas border border-border-strong p-1.5 flex-shrink-0"
                     />
                   </button>
                 );
