@@ -3,10 +3,7 @@ import {
   SpellFilters, 
   SpellItem, 
   SpellMetadata, 
-  SavedCharacterRecord, 
-  AncestryItem, 
-  BackgroundItem, 
-  ClassItem 
+  SavedCharacterRecord
 } from './types/pf2e';
 import { 
   fetchSpells, 
@@ -26,6 +23,7 @@ import { LevelProgressionView, SheetGuard } from './components/LevelProgressionV
 import { EquipmentExplorerView } from './components/EquipmentExplorerView';
 import { FeatExplorerView } from './components/FeatExplorerView';
 import { SettingsModal, ThemeName } from './components/SettingsModal';
+import { HpProgressionMode } from './types/pf2e';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { SplashScreen } from './components/SplashScreen';
 import { useI18n } from './i18n/I18nContext';
@@ -41,7 +39,6 @@ import {
   Search, 
   User, 
   Award, 
-  TrendingUp,
   Plus,
   Menu,
   X,
@@ -74,7 +71,7 @@ const INITIAL_FILTERS: SpellFilters = {
 };
 
 export const App: React.FC = () => {
-  const { t, locale, translator } = useI18n();
+  const { t, locale } = useI18n();
   const [showSettings, setShowSettings] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const handleSplashDone = useCallback(() => setShowSplash(false), []);
@@ -90,6 +87,17 @@ export const App: React.FC = () => {
   useEffect(() => {
     setSelectedPortraitDb(portraitDb);
   }, [portraitDb]);
+  const [hpMode, setHpMode] = useState<HpProgressionMode>(() => {
+    try {
+      const value = localStorage.getItem('pf2e_hp_mode');
+      return value === 'average' || value === 'roll' ? value : 'full';
+    } catch {
+      return 'full';
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('pf2e_hp_mode', hpMode); } catch { /* ignore */ }
+  }, [hpMode]);
   const [filters, setFilters] = useState<SpellFilters>(INITIAL_FILTERS);
   const [metadata, setMetadata] = useState<SpellMetadata | null>(null);
   const [spells, setSpells] = useState<SpellItem[]>([]);
@@ -97,7 +105,6 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [selectedSpell, setSelectedSpell] = useState<SpellItem | null>(null);
-  const [expandedSpellId, setExpandedSpellId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
 
   const sheetGuard = useRef<SheetGuard | null>(null);
@@ -947,6 +954,7 @@ export const App: React.FC = () => {
           {activeTab === 'creator' ? (
             /* ABC CHARACTER CREATION WIZARD */
             <CharacterCreatorView
+              onGuardChange={onGuardChange}
               onNavigateToLevels={() => setActiveTab('levels')}
               onCharacterSaved={(savedId) => {
                 setActiveCharId(savedId);
@@ -959,10 +967,12 @@ export const App: React.FC = () => {
               activeCharId={activeCharId}
               theme={theme}
               onThemeChange={setTheme}
+              hpMode={hpMode}
               onGuardChange={onGuardChange}
               onNavigateToCreator={() => setActiveTab('creator')}
               onCharacterSelected={(char) => setActiveCharId(char.id)}
               onCharactersChanged={refreshCharacters}
+              onDeleteCharacter={(char) => setConfirmDeleteChar(char)}
             />
           ) : activeTab === 'feats' ? (
             /* FEATS EXPLORER VIEW (7,213 FEATS) */
@@ -977,6 +987,7 @@ export const App: React.FC = () => {
             <SpellbookBuilderView
               metadata={metadata}
               onSelectSpellForDetail={setSelectedSpell}
+              onGuardChange={onGuardChange}
             />
           ) : (
             /* SPELL CATALOG SEARCH VIEW */
@@ -1088,7 +1099,7 @@ export const App: React.FC = () => {
       </div>}
 
       {showSplash && <SplashScreen onDone={handleSplashDone} />}
-      {showSettings && <SettingsModal theme={theme} onThemeChange={setTheme} portraitDb={portraitDb} onPortraitDbChange={setPortraitDb} onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsModal theme={theme} onThemeChange={setTheme} portraitDb={portraitDb} onPortraitDbChange={setPortraitDb} hpMode={hpMode} onHpModeChange={setHpMode} onClose={() => setShowSettings(false)} />}
 
       {confirmDeleteChar && (
         <ConfirmDialog

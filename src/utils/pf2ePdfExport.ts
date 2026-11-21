@@ -9,6 +9,7 @@ import {
   AttributeKey,
   CharacterCompanion,
   CharacterInventory,
+  CharacterSpellcastingState,
   CharacterStrike,
   LevelProgressionData,
   ProficiencyRank,
@@ -16,6 +17,7 @@ import {
   VisionType,
 } from '../types/pf2e';
 import { SessionState } from './conditions';
+import { resolvePortraitSrc } from './portrait';
 
 export interface PdfExportPayload {
   charName: string;
@@ -23,6 +25,7 @@ export interface PdfExportPayload {
   ancestryName: string;
   backgroundName: string;
   className: string;
+  portrait?: string;
   vision: VisionType;
   senses: string;
   attributes: Record<AttributeKey, number>;
@@ -41,6 +44,7 @@ export interface PdfExportPayload {
   inventory: CharacterInventory;
   session: SessionState;
   companions: CharacterCompanion[];
+  spellcasting?: CharacterSpellcastingState;
 }
 
 const RANK_SUFFIXES: readonly { rank: ProficiencyRank; suffix: string }[] = [
@@ -71,6 +75,31 @@ const PDF_SKILL_PREFIX: Partial<Record<SkillKey, string>> = {
 
 function signedStr(n: number): string {
   return n >= 0 ? `+${n}` : `${n}`;
+}
+
+async function loadImageAsPngBytes(src: string): Promise<Uint8Array | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || img.width || 256;
+        canvas.height = img.naturalHeight || img.height || 256;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(null); return; }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (!blob) { resolve(null); return; }
+          blob.arrayBuffer().then(buf => resolve(new Uint8Array(buf))).catch(() => resolve(null));
+        }, 'image/png');
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
 }
 
 export async function exportCharacterToFillablePdf(data: PdfExportPayload): Promise<void> {
@@ -284,6 +313,60 @@ export async function exportCharacterToFillablePdf(data: PdfExportPayload): Prom
   }
   if (noteSections.length > 0) {
     setText('NOTES_2', noteSections.join('\n\n'));
+  }
+
+  // 11. Spellcasting (Spell Attack, Spell DC, Spell Slots)
+  if (data.spellcasting && data.spellcasting.proficiency > 0) {
+    const sc = data.spellcasting;
+    const scAbilityMod = data.attributes[sc.ability] || 0;
+    const scProfBonus = getProficiencyBonus(sc.proficiency, data.level);
+    const spellAttack = scAbilityMod + scProfBonus;
+    const spellDc = 10 + spellAttack;
+
+    setText('SPELL ATTACK MOD', signedStr(spellAttack));
+    setText('SPELL ATTACK ABILITY', signedStr(scAbilityMod));
+    setText('SPELL ATTACK PROF', signedStr(scProfBonus));
+    checkRankBoxes('SPELL ATTACK', sc.proficiency);
+
+    setText('SPELL DC Mod', spellDc);
+    setText('SPELL DC ABILITY', signedStr(scAbilityMod));
+    setText('SPELL DC PROF', signedStr(scProfBonus));
+    checkRankBoxes('SPELL DC', sc.proficiency);
+
+    for (let rank = 1; rank <= 10; rank++) {
+      const maxSlots = sc.slotsMax[rank] || 0;
+      const usedSlots = sc.slotsUsed[rank] || 0;
+      if (maxSlots > 0) {
+        setText(`SPELL SLOTS ${rank}`, maxSlots);
+        setText(`SPELL SLOTS REMAINING ${rank}`, Math.max(0, maxSlots - usedSlots));
+      }
+    }
+  }
+
+  // 12. Embed Portrait Image into Page 3 (Image163_af_image)
+  const resolvedPortrait = resolvePortraitSrc(data.portrait);
+  if (resolvedPortrait && typeof document !== 'undefined') {
+    try {
+      const pngBytes = await loadImageAsPngBytes(resolvedPortrait);
+      if (pngBytes) {
+        const embedded = await doc.embedPng(pngBytes);
+        const btn = form.getButton('Image163_af_image');
+        const widget = btn.acroField.getWidgets()[0];
+        const pages = doc.getPages();
+        const pageIdx = widget ? pages.findIndex(p => p.ref === widget.P()) : -1;
+        const rect = widget?.getRectangle();
+        if (pageIdx >= 0 && rect) {
+          const scale = Math.min(rect.width / embedded.width, rect.height / embedded.height);
+          const drawW = embedded.width * scale;
+          const drawH = embedded.height * scale;
+          const drawX = rect.x + (rect.width - drawW) / 2;
+          const drawY = rect.y + (rect.height - drawH) / 2;
+          pages[pageIdx].drawImage(embedded, { x: drawX, y: drawY, width: drawW, height: drawH });
+        }
+      }
+    } catch {
+      /* Ignore portrait embedding failure */
+    }
   }
 
   const outBytes = await doc.save();

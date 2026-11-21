@@ -6,6 +6,9 @@ import {
   AttributeKey, 
   SkillKey,
   ProficiencyRank,
+  LoreSkillEntry,
+  CharacterSpellcastingState,
+  HpProgressionMode,
   FeatItem,
   FeatSelectionRecord,
   LevelProgressionData,
@@ -25,12 +28,10 @@ import {
 } from '../services/api';
 import { 
   ALL_ATTRIBUTES, 
-  ATTRIBUTE_INFO, 
   ALL_SKILLS, 
   SKILL_INFO, 
   getProficiencyBonus,
   resolvePf2eIcon,
-  cleanSnippetText,
   cleanDescriptionHtml
 } from '../utils/formatters';
 import { calculateArmorClass } from '../utils/armor';
@@ -39,7 +40,7 @@ import { ProficiencySelector } from './ProficiencySelector';
 import { StrikesView } from './StrikesView';
 import { InventoryView } from './InventoryView';
 import { FeatPickerModal } from './FeatPickerModal';
-import { GeneralSettingsFields, ThemeName } from './SettingsModal';
+import { ThemeName } from './SettingsModal';
 import { ConfirmDialog } from './ConfirmDialog';
 import { IconButton } from './IconButton';
 import { SessionCombatPanel } from './SessionCombatPanel';
@@ -48,7 +49,8 @@ import { PortraitPickerModal } from './PortraitPickerModal';
 import { resolvePortraitSrc } from '../utils/portrait';
 import { exportCharacterToFillablePdf } from '../utils/pf2ePdfExport';
 import { DEFAULT_SESSION_STATE, SessionState, computeConditionPenalties } from '../utils/conditions';
-import { useModalFocus } from '../utils/useModalFocus';
+import { computeInitialSkillBudget, deriveDefaultLoreSkills } from '../utils/skills';
+import { SpellsSheetTab, deriveDefaultSpellcasting } from './SpellsSheetTab';
 import { useI18n } from '../i18n/I18nContext';
 import { TranslateFn } from '../i18n/Translator';
 import { attributeName, attributeShort, skillName, proficiencyWithBonus, proficiencyShort, proficiencyName, signed } from '../i18n/gameTerms';
@@ -60,43 +62,37 @@ import {
   BookOpen, 
   User, 
   Check, 
-  X, 
-  ChevronRight, 
-  ChevronDown, 
   Plus, 
-  RotateCcw, 
   Save, 
   Trash2, 
-  ArrowRight, 
-  Info, 
-  AlertCircle, 
   Layers, 
   CheckCircle2, 
   Star,
   Zap,
   Footprints,
   Eye,
-  Crosshair,
-  Users,
   ArrowUpCircle,
   ArrowDownCircle,
-  UserCheck,
-  Printer,
   FileDown,
-  Settings,
-  Camera
+  Camera,
+  Dices,
+  Download,
+  Upload
 } from 'lucide-react';
+import { exportCharacterJson, parseImportedCharacterJson } from '../utils/characterJson';
 
 export interface SheetGuard { dirty: boolean; save: () => Promise<boolean>; }
 
 interface LevelProgressionViewProps {
   theme: ThemeName;
   onThemeChange: (theme: ThemeName) => void;
+  hpMode?: HpProgressionMode;
   onGuardChange?: (guard: SheetGuard | null) => void;
   activeCharId?: string | null;
   onNavigateToCreator?: () => void;
   onCharacterSelected?: (char: SavedCharacterRecord) => void;
   onCharactersChanged?: () => void;
+  onDeleteCharacter?: (char: SavedCharacterRecord) => void;
   onOpenCharModal?: () => void;
 }
 
@@ -156,21 +152,63 @@ function getFeatSlotsForLevel(t: TranslateFn, level: number, className: string =
   return slots;
 }
 
+function maxSkillRankForLevel(level: number): ProficiencyRank {
+  if (level >= 15) return 4;
+  if (level >= 7) return 3;
+  if (level >= 3) return 2;
+  return 1;
+}
+
+function computeAttributesAtLevel(
+  baseAttributes: Record<AttributeKey, number>,
+  levelData: Record<number, LevelProgressionData>,
+  targetLevel: number
+): { mods: Record<AttributeKey, number>; partial: Record<AttributeKey, boolean> } {
+  const mods: Record<AttributeKey, number> = { ...baseAttributes };
+  const partial: Record<AttributeKey, boolean> = {
+    str: false,
+    dex: false,
+    con: false,
+    int: false,
+    wis: false,
+    cha: false,
+  };
+
+  for (const lvl of [5, 10, 15, 20]) {
+    if (targetLevel < lvl) continue;
+    const boosts = levelData[lvl]?.attributeBoosts || [];
+    for (const attr of boosts) {
+      if ((mods[attr] || 0) < 4) {
+        mods[attr] = (mods[attr] || 0) + 1;
+      } else if (!partial[attr]) {
+        partial[attr] = true;
+      } else {
+        mods[attr] = (mods[attr] || 0) + 1;
+        partial[attr] = false;
+      }
+    }
+  }
+
+  return { mods, partial };
+}
+
 export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({ 
   activeCharId,
   theme,
   onThemeChange,
+  hpMode = 'full',
   onGuardChange,
   onNavigateToCreator,
   onCharacterSelected,
   onCharactersChanged,
+  onDeleteCharacter,
   onOpenCharModal
 }) => {
   const { t } = useI18n();
   // Compendium lists
   const [ancestries, setAncestries] = useState<AncestryItem[]>([]);
-  const [backgrounds, setBackgrounds] = useState<BackgroundItem[]>([]);
-  const [classes, setClasses] = useState<ClassItem[]>([]);
+  const [, setBackgrounds] = useState<BackgroundItem[]>([]);
+  const [, setClasses] = useState<ClassItem[]>([]);
   const [savedCharacters, setSavedCharacters] = useState<SavedCharacterRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -185,7 +223,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
   const [senses, setSenses] = useState('');
   const [portrait, setPortrait] = useState<string | undefined>(undefined);
   const [isPortraitPickerOpen, setIsPortraitPickerOpen] = useState(false);
-  const [sheetTab, setSheetTab] = useState<'combat' | 'skills' | 'feats' | 'inventory' | 'companion'>('combat');
+  const [sheetTab, setSheetTab] = useState<'combat' | 'skills' | 'feats' | 'spells' | 'progression' | 'inventory' | 'companion'>('combat');
   const [freeArchetype, setFreeArchetype] = useState(false);
   const [charName, setCharName] = useState<string>(() => t('sheet.defaultCharacterName'));
   const [selectedAncestry, setSelectedAncestry] = useState<AncestryItem | null>(null);
@@ -210,6 +248,9 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
   const [initialTrainedSkills, setInitialTrainedSkills] = useState<Set<SkillKey>>(
     new Set(['athletics', 'acrobatics', 'intimidation', 'survival'])
   );
+  const [loreSkills, setLoreSkills] = useState<LoreSkillEntry[]>([]);
+  const [newLoreName, setNewLoreName] = useState('');
+  const [spellcasting, setSpellcasting] = useState<CharacterSpellcastingState>(() => deriveDefaultSpellcasting(null, 1));
 
   // Level data store: 1 to 20
   const [levelData, setLevelData] = useState<Record<number, LevelProgressionData>>(() => {
@@ -226,8 +267,6 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
   });
 
   // Sheet View Mode: 'consolidated' (unified view of all feats, skills, stats) or 'planner' (level-by-level evolution)
-  const [sheetViewMode, setSheetViewMode] = useState<'consolidated' | 'planner'>('consolidated');
-
   // Modal Feat Picker State
   const [activeSlotModal, setActiveSlotModal] = useState<{
     slotId: string;
@@ -246,6 +285,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
 
   const savedSnapshot = useRef<string | null>(null);
   const needsBaseline = useRef(true);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   // Load compendia and characters on mount
   useEffect(() => {
@@ -397,6 +437,16 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
 
       setLevelData(parsed.progressionLevels ? { ...emptyLevels, ...parsed.progressionLevels } : emptyLevels);
       setInitialTrainedSkills(Array.isArray(parsed.initialTrainedSkills) ? new Set(parsed.initialTrainedSkills) : new Set());
+      setLoreSkills(
+        Array.isArray(parsed.loreSkills)
+          ? parsed.loreSkills
+          : deriveDefaultLoreSkills(cs.background || null, cs.selectedClass || null)
+      );
+      setSpellcasting(
+        parsed.spellcasting
+          ? parsed.spellcasting
+          : deriveDefaultSpellcasting(cs.selectedClass || null, rec.level || 1)
+      );
     } catch (e) {
       console.error('Erro ao carregar registro salvo:', e);
     }
@@ -450,26 +500,19 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     return found || null;
   }, [selectedAncestry, ancestries, savedCharacters, charId]);
 
-  // Active Level for calculations (in consolidated mode uses character's official level; in planner mode uses inspectLevel)
-  const activeLevel = sheetViewMode === 'consolidated' ? currentLevel : inspectLevel;
+  // Active Level for calculations (in progression tab uses inspectLevel; otherwise character's official level)
+  const activeLevel = sheetTab === 'progression' ? inspectLevel : currentLevel;
 
-  // Attribute Boosts calculation per level up to activeLevel
-  const currentAttributes = useMemo(() => {
-    const mods: Record<AttributeKey, number> = { ...baseAttributes };
+  const initialSkillBudget = useMemo(
+    () => computeInitialSkillBudget(selectedBackground, selectedClass, baseAttributes.int || 0),
+    [selectedBackground, selectedClass, baseAttributes.int]
+  );
 
-    // Apply boosts at levels 5, 10, 15, 20 up to activeLevel
-    [5, 10, 15, 20].forEach(lvl => {
-      if (activeLevel >= lvl) {
-        const boosts = levelData[lvl]?.attributeBoosts || [];
-        boosts.forEach(attr => {
-          // In standard PF2e Remaster: +1 modifier
-          mods[attr] = (mods[attr] || 0) + 1;
-        });
-      }
-    });
-
-    return mods;
-  }, [baseAttributes, activeLevel, levelData]);
+  // Attribute Boosts calculation per level up to activeLevel (with PF2e partial boosts >= +4)
+  const { mods: currentAttributes, partial: partialAttributes } = useMemo(
+    () => computeAttributesAtLevel(baseAttributes, levelData, activeLevel),
+    [baseAttributes, activeLevel, levelData]
+  );
 
   // Check if character has Toughness or Diehard feats (both recalculate and award bonus HP)
   const hpBonusInfo = useMemo(() => {
@@ -504,23 +547,37 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
   // Hit Points calculation per level
   const hpStats = useMemo(() => {
     const ancestryHp = selectedAncestry?.hp || 8;
-    const classHp = selectedClass?.hp || 10;
+    const baseClassHp = selectedClass?.hp || 10;
+    const averageClassHp = Math.ceil((baseClassHp + 1) / 2);
     const conMod = currentAttributes.con || 0;
 
-    // Per level HP gain
-    const perLevelHp = Math.max(1, classHp + conMod) + hpBonusInfo.bonusPerLevel;
+    const getLevelClassHp = (lvl: number): number => {
+      if (lvl <= 1 || hpMode === 'full') return baseClassHp;
+      if (hpMode === 'average') return averageClassHp;
+      const rolled = levelData[lvl]?.hpRoll;
+      return typeof rolled === 'number' && rolled >= 1 ? Math.min(baseClassHp, rolled) : averageClassHp;
+    };
 
-    // Total HP at active level
-    const totalHp = ancestryHp + (activeLevel * Math.max(1, classHp + conMod)) + (hpBonusInfo.bonusPerLevel * activeLevel);
+    let totalHp = ancestryHp;
+    let activeClassHp = baseClassHp;
+    for (let l = 1; l <= activeLevel; l++) {
+      const lClassHp = getLevelClassHp(l);
+      if (l === activeLevel) activeClassHp = lClassHp;
+      totalHp += Math.max(1, lClassHp + conMod) + hpBonusInfo.bonusPerLevel;
+    }
+
+    const perLevelHp = Math.max(1, activeClassHp + conMod) + hpBonusInfo.bonusPerLevel;
 
     return {
       ancestryHp,
-      classHp,
+      baseClassHp,
+      averageClassHp,
+      classHp: activeClassHp,
       conMod,
       perLevelHp,
       totalHp
     };
-  }, [selectedAncestry, selectedClass, currentAttributes.con, activeLevel, hpBonusInfo]);
+  }, [selectedAncestry, selectedClass, currentAttributes.con, activeLevel, hpBonusInfo, hpMode, levelData]);
 
   // Skill ranks calculated up to activeLevel
   const skillRanks = useMemo(() => {
@@ -552,8 +609,9 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     for (let l = 1; l <= activeLevel; l++) {
       Object.values(levelData[l]?.feats || {}).forEach(feat => applyFeatSkillEffects(feat, ranks));
       const incs = levelData[l]?.skillIncreases || [];
+      const levelCap = maxSkillRankForLevel(l);
       incs.forEach(s => {
-        if (ranks[s] < 4) {
+        if (ranks[s] < levelCap) {
           ranks[s] = (ranks[s] + 1) as ProficiencyRank;
         }
       });
@@ -698,7 +756,6 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
   // Handle setting skill increase at a level
   const setLevelSkillIncrease = (level: number, skill: SkillKey) => {
     setLevelData(prev => {
-      const current = prev[level]?.skillIncreases || [];
       return {
         ...prev,
         [level]: {
@@ -778,6 +835,37 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     });
   };
 
+  const addLoreSkill = () => {
+    const trimmed = newLoreName.trim();
+    if (!trimmed) return;
+    const exists = loreSkills.some(l => l.name.toLowerCase() === trimmed.toLowerCase());
+    if (exists) {
+      setNewLoreName('');
+      return;
+    }
+    setLoreSkills(prev => [
+      ...prev,
+      { id: `lore_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`, name: trimmed, rank: 1 }
+    ]);
+    setNewLoreName('');
+  };
+
+  const updateLoreRank = (id: string, rank: ProficiencyRank) => {
+    setLoreSkills(prev => prev.map(l => (l.id === id ? { ...l, rank } : l)));
+  };
+
+  const removeLoreSkill = (id: string) => {
+    setLoreSkills(prev => prev.filter(l => l.id !== id));
+  };
+
+  const rollHpForLevel = (lvl: number) => {
+    const rolled = Math.floor(Math.random() * hpStats.baseClassHp) + 1;
+    setLevelData(prev => ({
+      ...prev,
+      [lvl]: { ...prev[lvl], hpRoll: rolled }
+    }));
+  };
+
   const ancestryVision: VisionType = useMemo(() => {
     try {
       const sys = JSON.parse(selectedAncestry?.system_json || '{}') as { vision?: string };
@@ -791,7 +879,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
 
   const snapshot = (level: number = currentLevel) => JSON.stringify({
     charId, charName, level, portrait, companions, visionOverride, visionRange, senses, selectedAncestry, selectedBackground, selectedClass, baseAttributes,
-    initialTrainedSkills: [...initialTrainedSkills].sort(), freeArchetype, inventory, strikes, session,
+    initialTrainedSkills: [...initialTrainedSkills].sort(), loreSkills, spellcasting, freeArchetype, inventory, strikes, session,
     levelData: Object.fromEntries(Object.entries(levelData).map(([key, data]) => [key, {
       ...data, feats: Object.fromEntries(Object.entries(data.feats || {}).map(([slot, feat]) => {
         const { system_json, prerequisites, ...selection } = feat;
@@ -847,6 +935,8 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
           session,
           progressionLevels: levelData,
           initialTrainedSkills: Array.from(initialTrainedSkills),
+          loreSkills,
+          spellcasting,
           combatStats,
           hpStats
         }
@@ -1078,6 +1168,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
         ancestryName: selectedAncestry?.name || '',
         backgroundName: selectedBackground?.name || '',
         className: selectedClass?.name || '',
+        portrait,
         vision: effectiveVision,
         senses: [visionRange, senses].filter(Boolean).join(', '),
         attributes: currentAttributes,
@@ -1108,6 +1199,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
         inventory,
         session,
         companions,
+        spellcasting,
       });
     } catch (err) {
       console.error('Erro ao exportar PDF:', err);
@@ -1115,13 +1207,79 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     }
   };
 
+  const handleExportJson = () => {
+    exportCharacterJson({
+      name: charName,
+      level: currentLevel,
+      ancestry: selectedAncestry?.name || '',
+      heritage: '',
+      background: selectedBackground?.name || '',
+      class: selectedClass?.name || '',
+      subclass: '',
+      data: {
+        charState: {
+          name: charName,
+          level: currentLevel,
+          ancestry: selectedAncestry,
+          background: selectedBackground,
+          selectedClass: selectedClass,
+        },
+        baseAttributes,
+        calculatedAttributes: Object.fromEntries(
+          ALL_ATTRIBUTES.map(attr => [attr, { mod: currentAttributes[attr], score: 10 + currentAttributes[attr] * 2 }])
+        ),
+        freeArchetype,
+        portrait,
+        companions,
+        visionOverride,
+        visionRange,
+        senses,
+        inventory,
+        strikes,
+        session,
+        progressionLevels: levelData,
+        initialTrainedSkills: Array.from(initialTrainedSkills),
+        loreSkills,
+        spellcasting,
+        combatStats,
+        hpStats,
+      },
+    });
+  };
+
+  const handleImportJson = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const imported = parseImportedCharacterJson(text);
+      const res = await saveCharacter(imported);
+      if (res.success) {
+        const updated = await fetchCharacters();
+        setSavedCharacters(updated);
+        const match = updated.find(c => c.id === res.id);
+        if (match) {
+          loadSavedCharacterRecord(match);
+          onCharacterSelected?.(match);
+        }
+        onCharactersChanged?.();
+        setSaveMsg(t('sheet.importJsonOk', { name: imported.name }));
+        setTimeout(() => setSaveMsg(null), 4000);
+      }
+    } catch (err) {
+      console.error('Erro ao importar JSON:', err);
+      setSaveErrorMsg(t('sheet.importJsonError'));
+    }
+  };
+
   return (
     <div className="space-y-3">
       {/* Top Banner & Character Switcher */}
       <div className="bg-surface border border-border-strong rounded-2xl p-5 shadow-xl space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          {/* Character Identity & Status */}
-          <div className="flex items-center space-x-3.5 min-w-0">
+        <div className="grid grid-cols-1 lg:grid-cols-3 items-start gap-4">
+          {/* Column 1 (2/3): Character Identity & Status (left-top aligned) */}
+          <div className="lg:col-span-2 flex items-start space-x-3.5 min-w-0">
             <button
               type="button"
               onClick={() => setIsPortraitPickerOpen(true)}
@@ -1142,7 +1300,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                 <Camera className="w-3 h-3 text-white" />
               </span>
             </button>
-            <div className="min-w-0">
+            <div className="min-w-0 space-y-1.5">
               <div className="flex items-center space-x-2 flex-wrap">
                 <input
                   type="text"
@@ -1151,10 +1309,6 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                   className="text-xl font-black text-white bg-transparent border-b border-transparent hover:border-border-strong focus:border-accent focus:outline-none transition-colors max-w-sm truncate"
                   placeholder={t('sheet.characterNamePlaceholder')}
                 />
-                <span className="text-xs font-black px-2.5 py-0.5 rounded-full bg-emerald-500 text-black flex items-center gap-1 shadow">
-                  <Check className="w-3 h-3 stroke-[3]" />
-                  <span>{t('common.level', { level: currentLevel })}</span>
-                </span>
                 {inspectLevel !== currentLevel && (
                   <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-accent text-black">
                     {t('sheet.inspecting', { level: inspectLevel })}
@@ -1166,18 +1320,26 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                   </span>
                 )}
               </div>
-              <p className="text-xs text-text-secondary mt-0.5 flex items-center space-x-2 truncate">
-                <span>{selectedAncestry?.name || t('common.ancestry')}</span>
-                <span>•</span>
-                <span>{selectedBackground?.name || t('common.background')}</span>
-                <span>•</span>
-                <span className="text-status-info font-semibold">{selectedClass?.name || t('common.class')}</span>
-              </p>
+              <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                <span className="px-2.5 py-0.5 rounded-full bg-inset border border-border-strong text-text-secondary font-semibold">
+                  {selectedAncestry?.name || t('common.ancestry')}
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full bg-inset border border-border-strong text-text-secondary font-semibold">
+                  {selectedBackground?.name || t('common.background')}
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full bg-inset border border-border-strong text-status-info font-semibold">
+                  {selectedClass?.name || t('common.class')}
+                </span>
+                <span className="text-xs font-black px-2.5 py-0.5 rounded-full bg-emerald-500 text-black flex items-center gap-1 shadow">
+                  <Check className="w-3 h-3 stroke-[3]" />
+                  <span>{t('common.level', { level: currentLevel })}</span>
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* Action buttons: Level Up, Level Down, Save, Print, Settings */}
-          <div className="flex items-center gap-2 flex-wrap print:hidden">
+          {/* Column 2 (1/3): Action buttons (Level Up, Level Down, Save, Export, Import, Delete) */}
+          <div className="lg:col-span-1 flex items-start justify-start lg:justify-end gap-2 flex-wrap print:hidden">
             <IconButton
               onClick={handleLevelUp}
               disabled={currentLevel >= 20}
@@ -1203,15 +1365,52 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
               label={t('sheet.exportPdf')}
               icon={<FileDown className="w-4 h-4 text-accent-text" />}
             />
+            <IconButton
+              onClick={handleExportJson}
+              label={t('sheet.exportJson')}
+              icon={<Download className="w-4 h-4 text-accent-text" />}
+            />
+            <IconButton
+              onClick={() => importInputRef.current?.click()}
+              label={t('sheet.importJson')}
+              icon={<Upload className="w-4 h-4 text-accent-text" />}
+            />
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".json,application/json"
+              onChange={handleImportJson}
+              className="hidden"
+            />
+            {onDeleteCharacter && (
+              <IconButton
+                onClick={() => {
+                  const target = savedCharacters.find(c => c.id === charId) || {
+                    id: charId,
+                    name: charName,
+                    level: currentLevel,
+                    ancestry: selectedAncestry?.name || '',
+                    heritage: '',
+                    background: selectedBackground?.name || '',
+                    class: selectedClass?.name || '',
+                    subclass: '',
+                    data_json: ''
+                  };
+                  onDeleteCharacter(target);
+                }}
+                label={t('sheet.deleteCharacter')}
+                icon={<Trash2 className="w-4 h-4 text-status-danger" />}
+              />
+            )}
           </div>
+          {/* Row 2 (3/3): Full-width notifications area */}
+          {saveMsg && (
+            <div className="lg:col-span-3 p-3 bg-status-success-bg/60 border border-status-success-border/60 rounded-xl text-xs text-status-success flex items-center space-x-2">
+              <CheckCircle2 className="w-4 h-4 text-status-success flex-shrink-0" />
+              <span>{saveMsg}</span>
+            </div>
+          )}
         </div>
-
-        {saveMsg && (
-          <div className="p-3 bg-status-success-bg/60 border border-status-success-border/60 rounded-xl text-xs text-status-success flex items-center space-x-2">
-            <CheckCircle2 className="w-4 h-4 text-status-success" />
-            <span>{saveMsg}</span>
-          </div>
-        )}
 
         {/* Live Combat Stats Summary: Defesas vs Percepção & Movimento */}
         <div className="space-y-3 pt-3 border-t border-border-strong tabular-nums">
@@ -1359,42 +1558,47 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
         </div>
       </div>
 
-      {/* Sub-abas seletoras de fichas (fora do card de dados do personagem) */}
-      <div className="flex flex-wrap items-end gap-1 px-1 border-b border-border-strong print:hidden" role="tablist">
-        {(
-          [
-            { id: 'combat', label: t('sheet.tab.combat') },
-            { id: 'skills', label: t('sheet.tab.skills') },
-            { id: 'feats', label: t('sheet.tab.feats'), badge: pendingChoicesCount > 0 ? pendingChoicesCount : undefined },
-            { id: 'inventory', label: t('sheet.tab.inventory') },
-            { id: 'companion', label: t('sheet.tab.companion'), badge: companions.length > 0 ? companions.length : undefined },
-          ] as const
-        ).map(tab => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={sheetTab === tab.id}
-            onClick={() => setSheetTab(tab.id)}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-t-xl border border-b-0 text-xs font-bold transition-all ${
-              sheetTab === tab.id
-                ? 'bg-surface text-accent-text border-border-strong border-t-2 border-t-accent -mb-px pb-2.5 shadow-sm'
-                : 'bg-inset/70 hover:bg-surface/70 text-text-secondary hover:text-text-primary border-transparent'
-            }`}
-          >
-            <span>{tab.label}</span>
-            {'badge' in tab && tab.badge !== undefined && (
-              <span className={`px-1.5 py-0.5 rounded-full text-[11px] tabular-nums ${
+      {/* Sub-abas seletoras acopladas ao painel inferior */}
+      <div>
+        <div className="flex flex-wrap items-end gap-1 px-4 print:hidden" role="tablist">
+          {(
+            [
+              { id: 'combat', label: t('sheet.tab.combat') },
+              { id: 'skills', label: t('sheet.tab.skills') },
+              { id: 'feats', label: t('sheet.tab.feats') },
+              { id: 'spells', label: t('sheet.tab.spells') },
+              { id: 'inventory', label: t('sheet.tab.inventory') },
+              { id: 'companion', label: t('sheet.tab.companion'), badge: companions.length > 0 ? companions.length : undefined },
+              { id: 'progression', label: t('sheet.tab.progression'), badge: pendingChoicesCount > 0 ? pendingChoicesCount : undefined },
+            ] as const
+          ).map(tab => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={sheetTab === tab.id}
+              onClick={() => setSheetTab(tab.id)}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-t-xl border border-b-0 text-xs font-bold transition-all ${
                 sheetTab === tab.id
-                  ? 'bg-accent/20 text-accent-text'
-                  : 'bg-status-warn-bg text-status-warn border border-status-warn-border'
-              }`}>
-                {tab.badge}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+                  ? 'bg-surface text-accent-text border-border-strong border-t-2 border-t-accent -mb-px pb-2.5 relative z-10'
+                  : 'bg-inset/70 hover:bg-surface/70 text-text-secondary hover:text-text-primary border-transparent'
+              }`}
+            >
+              <span>{tab.label}</span>
+              {'badge' in tab && tab.badge !== undefined && (
+                <span className={`px-1.5 py-0.5 rounded-full text-[11px] tabular-nums ${
+                  sheetTab === tab.id
+                    ? 'bg-accent/20 text-accent-text'
+                    : 'bg-status-warn-bg text-status-warn border border-status-warn-border'
+                }`}>
+                  {tab.badge}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        <div className="bg-surface border border-border-strong rounded-2xl p-4 shadow-xl">
 
       {sheetTab === 'combat' && (
         <div className="space-y-3">
@@ -1415,7 +1619,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
       )}
 
       {sheetTab === 'skills' && (
-        <div className="bg-surface border border-border-strong rounded-2xl p-4 shadow-xl space-y-3">
+        <div className="space-y-3">
           <h3 className="text-xs font-bold uppercase tracking-wider text-text-secondary flex items-center gap-1.5">
             <Award className="w-4 h-4 text-accent-text" />
             <span>{t('sheet.consolidatedSkills')}</span>
@@ -1461,11 +1665,67 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
               );
             })}
           </div>
+
+          {/* Specific Lore Skills (read-only view) */}
+          <div className="pt-3 border-t border-border-strong space-y-2">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-text-secondary flex items-center gap-1.5">
+              <BookOpen className="w-3.5 h-3.5 text-accent-text" />
+              <span>{t('sheet.loreSkills')}</span>
+            </h4>
+            {loreSkills.length === 0 ? (
+              <p className="text-xs text-text-muted italic">{t('sheet.noLoreSkills')}</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                {loreSkills.map(lore => {
+                  const intMod = currentAttributes.int || 0;
+                  const profBonus = getProficiencyBonus(lore.rank, currentLevel);
+                  const total = intMod + profBonus + conditionPenalties.allChecks;
+                  return (
+                    <div
+                      key={lore.id}
+                      className="flex items-center justify-between px-3 py-2 rounded-xl bg-inset border border-border-subtle text-xs"
+                    >
+                      <div className="min-w-0">
+                        <span className="font-bold text-text-primary block truncate">{lore.name}</span>
+                        <span className="text-[11px] text-text-muted uppercase tabular-nums">
+                          {attributeShort(t, 'int')} ({signed(intMod)})
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span
+                          title={proficiencyName(t, lore.rank)}
+                          className={`px-1.5 py-0.5 rounded text-[11px] font-bold border ${
+                            lore.rank > 0
+                              ? 'bg-accent/15 text-accent-text border-accent/40'
+                              : 'bg-elevated text-text-muted border-border-subtle'
+                          }`}
+                        >
+                          {proficiencyShort(t, lore.rank)}
+                        </span>
+                        <span className="font-bold text-sm text-accent-text min-w-[32px] text-right tabular-nums">
+                          {signed(total)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
+      {sheetTab === 'spells' && (
+        <SpellsSheetTab
+          spellcasting={spellcasting}
+          attributes={currentAttributes}
+          level={currentLevel}
+          onChange={setSpellcasting}
+        />
+      )}
+
       {sheetTab === 'inventory' && (
-        <InventoryView inventory={inventory} onChange={setInventory} />
+        <InventoryView inventory={inventory} strMod={currentAttributes.str || 0} onChange={setInventory} />
       )}
 
       {sheetTab === 'companion' && (
@@ -1474,95 +1734,72 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
 
       {sheetTab === 'feats' && (
         <div className="space-y-3">
-          {/* Toggle direto Ficha vs Planejador 1-20 */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+            {renderGroupedFeatCategoryCard(
+              t('sheet.classFeats'),
+              'class',
+              allSlotsGrouped.class,
+              <Award className="w-4 h-4 text-accent-text" />
+            )}
+
+            {freeArchetype && renderGroupedFeatCategoryCard(t('sheet.freeArchetype'), 'archetype', allSlotsGrouped.archetype, <Layers className="w-4 h-4 text-accent-text" />)}
+
+            {renderGroupedFeatCategoryCard(
+              t('sheet.ancestryFeats', { ancestry: activeAncestry?.name || selectedAncestry?.name || t('common.ancestry') }),
+              'ancestry',
+              allSlotsGrouped.ancestry,
+              <User className="w-4 h-4 text-status-success" />
+            )}
+
+            {renderGroupedFeatCategoryCard(
+              t('sheet.generalFeats'),
+              'general',
+              allSlotsGrouped.general,
+              <Star className="w-4 h-4 text-status-purple" />
+            )}
+
+            {renderGroupedFeatCategoryCard(
+              t('sheet.skillFeats'),
+              'skill',
+              allSlotsGrouped.skill,
+              <Zap className="w-4 h-4 text-status-warn" />
+            )}
+          </div>
+        </div>
+      )}
+
+      {sheetTab === 'progression' && (
+        <div className="space-y-3">
+          {/* Header com pendências e Arquétipo Livre */}
           <div className="bg-surface border border-border-strong rounded-2xl p-3 flex flex-wrap items-center justify-between gap-3 print:hidden">
             <div className="flex items-center gap-2">
               <Layers className="w-4 h-4 text-accent-text" />
-              <span className="text-sm font-bold text-text-primary">{t('sheet.feats')}</span>
+              <span className="text-sm font-bold text-text-primary">{t('sheet.tab.progression')}</span>
               {pendingChoicesCount > 0 && (
                 <span className="text-[11px] px-2 py-0.5 rounded-full bg-status-warn-bg text-status-warn border border-status-warn-border font-bold tabular-nums">
                   {t('sheet.pendingChoices')}: {pendingChoicesCount}
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                role="switch"
-                aria-label={t('sheet.freeArchetypeOption')}
-                aria-checked={freeArchetype}
-                onClick={() => setFreeArchetype(value => !value)}
-                title={t('sheet.freeArchetypeHint')}
-                className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors ${
-                  freeArchetype
-                    ? 'bg-status-success-bg text-status-success border-status-success-border'
-                    : 'bg-elevated text-text-secondary hover:text-text-primary border-border-strong'
-                }`}
-              >
-                {t('sheet.freeArchetype')}: {freeArchetype ? t('common.on') : t('common.off')}
-              </button>
-              <div className="flex items-center rounded-xl border border-border-strong bg-elevated p-0.5">
-              <button
-                type="button"
-                onClick={() => setSheetViewMode('consolidated')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                  sheetViewMode === 'consolidated'
-                    ? 'bg-accent text-accent-contrast shadow'
-                    : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                {t('sheet.modeConsolidated')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setSheetViewMode('planner')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                  sheetViewMode === 'planner'
-                    ? 'bg-accent text-accent-contrast shadow'
-                    : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                {t('sheet.modePlanner')}
-              </button>
-              </div>
-            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-label={t('sheet.freeArchetypeOption')}
+              aria-checked={freeArchetype}
+              onClick={() => setFreeArchetype(value => !value)}
+              title={t('sheet.freeArchetypeHint')}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors ${
+                freeArchetype
+                  ? 'bg-status-success-bg text-status-success border-status-success-border'
+                  : 'bg-elevated text-text-secondary hover:text-text-primary border-border-strong'
+              }`}
+            >
+              {t('sheet.freeArchetype')}: {freeArchetype ? t('common.on') : t('common.off')}
+            </button>
           </div>
 
-          {sheetViewMode === 'consolidated' ? (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
-              {renderGroupedFeatCategoryCard(
-                t('sheet.classFeats'),
-                'class',
-                allSlotsGrouped.class,
-                <Award className="w-4 h-4 text-accent-text" />
-              )}
-
-              {freeArchetype && renderGroupedFeatCategoryCard(t('sheet.freeArchetype'), 'archetype', allSlotsGrouped.archetype, <Layers className="w-4 h-4 text-accent-text" />)}
-
-              {renderGroupedFeatCategoryCard(
-                t('sheet.ancestryFeats', { ancestry: activeAncestry?.name || selectedAncestry?.name || t('common.ancestry') }),
-                'ancestry',
-                allSlotsGrouped.ancestry,
-                <User className="w-4 h-4 text-status-success" />
-              )}
-
-              {renderGroupedFeatCategoryCard(
-                t('sheet.generalFeats'),
-                'general',
-                allSlotsGrouped.general,
-                <Star className="w-4 h-4 text-status-purple" />
-              )}
-
-              {renderGroupedFeatCategoryCard(
-                t('sheet.skillFeats'),
-                'skill',
-                allSlotsGrouped.skill,
-                <Zap className="w-4 h-4 text-status-warn" />
-              )}
-            </div>
-          ) : (
-        /* ================= LEVEL PLANNER VIEW (LEVEL BY LEVEL) ================= */
-        <div className="space-y-3">
+          {/* ================= LEVEL PLANNER VIEW (LEVEL BY LEVEL) ================= */}
+          <div className="space-y-3">
           {/* Level Navigator Pills (1 to 20) */}
           <div className="bg-surface border border-border-strong rounded-2xl p-4 shadow-xl space-y-2">
         <div className="flex items-center justify-between text-xs text-text-secondary mb-1">
@@ -1636,6 +1873,56 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
               </div>
             </div>
 
+            {hpMode === 'roll' && inspectLevel >= 2 && (
+              <div className="p-3 bg-inset border border-border-strong rounded-xl flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-xs">
+                  <Dices className="w-4 h-4 text-accent-text flex-shrink-0" />
+                  <div>
+                    <span className="font-bold text-white block">
+                      {t('sheet.hpRollAtLevel', { die: hpStats.baseClassHp, level: inspectLevel })}
+                    </span>
+                    {levelData[inspectLevel]?.hpRoll === undefined && (
+                      <span className="text-[11px] text-text-muted">
+                        {t('sheet.hpRollUnrolled', { avg: hpStats.averageClassHp })}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={hpStats.baseClassHp}
+                    value={levelData[inspectLevel]?.hpRoll ?? ''}
+                    placeholder={String(hpStats.averageClassHp)}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      setLevelData(prev => {
+                        const next = { ...prev };
+                        if (raw === '') {
+                          const { hpRoll: _removed, ...rest } = next[inspectLevel] || { level: inspectLevel, attributeBoosts: [], skillIncreases: [], feats: {} };
+                          next[inspectLevel] = rest;
+                        } else {
+                          const parsed = Math.max(1, Math.min(hpStats.baseClassHp, Math.floor(Number(raw) || 1)));
+                          next[inspectLevel] = { ...next[inspectLevel], hpRoll: parsed };
+                        }
+                        return next;
+                      });
+                    }}
+                    className="w-16 px-2.5 py-1.5 rounded-lg bg-control border border-border-strong text-sm font-bold text-white text-center tabular-nums"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => rollHpForLevel(inspectLevel)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-hover text-black font-bold text-xs shadow transition-colors"
+                  >
+                    <Dices className="w-3.5 h-3.5" />
+                    <span>{t('sheet.rollHpDie', { die: hpStats.baseClassHp })}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Level Discrepancy Prompt */}
             {inspectLevel > currentLevel && (
               <div className="p-3 bg-elevated border border-border-strong rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
@@ -1671,7 +1958,6 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                 </p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
                   {ALL_ATTRIBUTES.map(attr => {
-                    const info = ATTRIBUTE_INFO[attr];
                     const selected = (levelData[inspectLevel]?.attributeBoosts || []).includes(attr);
                     return (
                       <button
@@ -1726,12 +2012,13 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                 >
                   <option value="">{t('sheet.selectSkillToIncrease')}</option>
                   {ALL_SKILLS.map(s => {
-                    const info = SKILL_INFO[s];
                     const currentRank = skillRanks[s];
-                    const nextRank = Math.min(4, currentRank + 1) as ProficiencyRank;
+                    const levelCap = maxSkillRankForLevel(inspectLevel);
+                    const atCap = currentRank >= levelCap;
+                    const nextRank = Math.min(levelCap, currentRank + 1) as ProficiencyRank;
                     return (
-                      <option key={s} value={s}>
-                        {skillName(t, s)} ({proficiencyWithBonus(t, currentRank)} ➔ {proficiencyWithBonus(t, nextRank)})
+                      <option key={s} value={s} disabled={atCap}>
+                        {skillName(t, s)} ({proficiencyWithBonus(t, currentRank)}{atCap ? ` — ${t('sheet.skillAtLevelCap', { level: inspectLevel })}` : ` ➔ ${proficiencyWithBonus(t, nextRank)}`})
                       </option>
                     );
                   })}
@@ -1858,29 +2145,43 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
           {/* Level 1 Initial Trained Skills Selection if inspecting Level 1 */}
           {inspectLevel === 1 && (
             <div className="bg-surface border border-border-strong rounded-2xl p-5 shadow-xl space-y-3">
-              <h4 className="text-xs font-black uppercase text-text-secondary tracking-wider flex items-center gap-1.5">
-                <BookOpen className="w-4 h-4 text-accent-text" />
-                <span>{t('sheet.initialTrainedSkills')}</span>
-              </h4>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-xs font-black uppercase text-text-secondary tracking-wider flex items-center gap-1.5">
+                  <BookOpen className="w-4 h-4 text-accent-text" />
+                  <span>{t('sheet.initialTrainedSkills')}</span>
+                </h4>
+                {selectedClass && (
+                  <span className="text-[11px] font-semibold text-accent-text tabular-nums">
+                    {t('sheet.initialSkillsBudget', {
+                      expected: initialSkillBudget.autoTrained.length + initialSkillBudget.freeBudget,
+                      selected: initialTrainedSkills.size
+                    })}
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-text-secondary">
                 {t('sheet.initialTrainedSkillsHint')}
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
                 {ALL_SKILLS.map(s => {
-                  const info = SKILL_INFO[s];
                   const trained = initialTrainedSkills.has(s);
+                  const isFromBg = initialSkillBudget.bgFixed.includes(s);
+                  const isFromClass = initialSkillBudget.classFixed.includes(s);
                   return (
                     <button
                       key={s}
                       onClick={() => toggleInitialTrainedSkill(s)}
+                      title={isFromBg || isFromClass ? t('sheet.initialSkillsFixedHint', { source: [isFromBg ? t('creator.skillsSourceBg') : '', isFromClass ? t('creator.skillsSourceClass') : ''].filter(Boolean).join(' + ') }) : undefined}
                       className={`p-2 rounded-lg text-xs font-semibold border flex items-center justify-between transition-all ${
                         trained
                           ? 'bg-elevated text-status-info border-status-info-border'
                           : 'bg-inset text-text-muted border-border-subtle hover:text-white'
                       }`}
                     >
-                      <span>{skillName(t, s)}</span>
-                      <span className="text-[11px]">{trained ? t('prof.1') : '—'}</span>
+                      <span className="truncate">{skillName(t, s)}</span>
+                      <span className="text-[11px] flex-shrink-0 ml-1">
+                        {isFromBg || isFromClass ? `${trained ? t('prof.1') : '—'} ★` : (trained ? t('prof.1') : '—')}
+                      </span>
                     </button>
                   );
                 })}
@@ -1899,19 +2200,94 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
             </h4>
             <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center">
               {ALL_ATTRIBUTES.map(attr => {
-                const info = ATTRIBUTE_INFO[attr];
                 const mod = currentAttributes[attr];
-                const score = 10 + mod * 2;
+                const isPartial = partialAttributes[attr];
+                const score = 10 + mod * 2 + (isPartial ? 1 : 0);
                 return (
                   <div key={attr} className="bg-inset border border-border-strong rounded-xl p-2.5">
                     <span className="text-[11px] uppercase font-bold text-text-secondary block">{attributeShort(t, attr)}</span>
-                    <span className="text-lg font-black text-white">{mod >= 0 ? `+${mod}` : mod}</span>
+                    <span className="text-lg font-black text-white">
+                      {mod >= 0 ? `+${mod}` : mod}
+                      {isPartial && <span className="text-xs text-accent-text ml-0.5" title="Partial boost (+4+)">*</span>}
+                    </span>
                     <span className="text-[11px] text-text-muted block">({score})</span>
                   </div>
                 );
               })}
             </div>
           </div>
+
+          {/* Rolled HP Dice List by Level (when hpMode === 'roll') */}
+          {hpMode === 'roll' && (() => {
+            const maxRollLvl = Math.max(currentLevel, inspectLevel, 2);
+            const rollLevels = Array.from({ length: maxRollLvl - 1 }, (_, i) => i + 2);
+            const hasPending = rollLevels.some(l => levelData[l]?.hpRoll === undefined);
+            return (
+              <div className="bg-surface border border-border-strong rounded-2xl p-4 shadow-xl space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-xs font-black uppercase text-text-secondary tracking-wider flex items-center gap-1.5">
+                    <Dices className="w-4 h-4 text-accent-text" />
+                    <span>{t('sheet.rolledHpHistory', { max: maxRollLvl })}</span>
+                  </h4>
+                  {hasPending && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLevelData(prev => {
+                          const next = { ...prev };
+                          for (const l of rollLevels) {
+                            if (next[l]?.hpRoll === undefined) {
+                              next[l] = { ...next[l], hpRoll: Math.floor(Math.random() * hpStats.baseClassHp) + 1 };
+                            }
+                          }
+                          return next;
+                        });
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-accent hover:bg-accent-hover text-black font-bold text-[11px] transition-colors"
+                    >
+                      {t('sheet.rollPendingHp')}
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-[200px] overflow-y-auto pr-1">
+                  {rollLevels.map(l => {
+                    const roll = levelData[l]?.hpRoll;
+                    return (
+                      <div
+                        key={l}
+                        className={`flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs ${
+                          l === inspectLevel
+                            ? 'bg-elevated border-accent'
+                            : 'bg-inset border-border-subtle'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setInspectLevel(l)}
+                          className="font-bold text-text-secondary hover:text-white text-left"
+                        >
+                          {t('common.levelShort', { level: l })}
+                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`font-black tabular-nums ${roll !== undefined ? 'text-accent-text' : 'text-text-muted text-[11px]'}`}>
+                            {roll !== undefined ? roll : t('sheet.hpRollAvgBadge', { avg: hpStats.averageClassHp })}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => rollHpForLevel(l)}
+                            title={t('sheet.rollHpDie', { die: hpStats.baseClassHp })}
+                            className="p-1 rounded bg-control hover:bg-control-hover text-accent-text transition-colors"
+                          >
+                            <Dices className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Full Skills Table (16 Perícias) */}
           <div className="bg-surface border border-border-strong rounded-2xl p-4 shadow-xl space-y-3">
@@ -1952,6 +2328,72 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                   </div>
                 );
               })}
+            </div>
+
+            {/* Specific Lore Skills (editable with TEML) */}
+            <div className="pt-3 border-t border-border-strong space-y-2.5">
+              <h5 className="text-xs font-black uppercase text-text-secondary tracking-wider flex items-center gap-1.5">
+                <BookOpen className="w-3.5 h-3.5 text-accent-text" />
+                <span>{t('sheet.loreSkills')}</span>
+              </h5>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newLoreName}
+                  onChange={e => setNewLoreName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addLoreSkill(); } }}
+                  placeholder={t('sheet.lorePlaceholder')}
+                  className="flex-1 min-w-0 bg-inset border border-border-strong rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-text-muted focus:outline-none focus:border-accent"
+                />
+                <button
+                  type="button"
+                  onClick={addLoreSkill}
+                  disabled={!newLoreName.trim()}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-accent hover:bg-accent-hover disabled:opacity-50 text-black font-bold text-xs whitespace-nowrap transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{t('sheet.addLore')}</span>
+                </button>
+              </div>
+              {loreSkills.length > 0 && (
+                <div className="space-y-1 max-h-[200px] overflow-y-auto pr-1">
+                  {loreSkills.map(lore => {
+                    const intMod = currentAttributes.int || 0;
+                    const profBonus = getProficiencyBonus(lore.rank, inspectLevel);
+                    const total = intMod + profBonus;
+                    return (
+                      <div
+                        key={lore.id}
+                        className="flex items-center justify-between gap-2 p-2 rounded-lg bg-inset border border-border-subtle text-xs"
+                      >
+                        <div className="flex items-center space-x-1.5 min-w-0 flex-1">
+                          <span className="font-semibold text-white truncate">{lore.name}</span>
+                          <span className="text-[11px] text-text-muted uppercase flex-shrink-0">({attributeShort(t, 'int')})</span>
+                        </div>
+                        <div className="flex items-center space-x-2 flex-shrink-0">
+                          <ProficiencySelector
+                            label={t('sheet.proficiencyIn', { skill: lore.name })}
+                            value={lore.rank}
+                            onChange={rank => updateLoreRank(lore.id, rank)}
+                          />
+                          <span className="font-black text-sm text-white w-7 text-right tabular-nums">
+                            {signed(total)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeLoreSkill(lore.id)}
+                            title={t('sheet.removeLore', { name: lore.name })}
+                            aria-label={t('sheet.removeLore', { name: lore.name })}
+                            className="p-1 rounded text-text-muted hover:text-status-danger hover:bg-status-danger-bg/40 transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
 
@@ -2005,9 +2447,10 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
         </div>
       </div>
     </div>
-          )}
         </div>
       )}
+        </div>
+      </div>
 
       {/* Feat Picker Dialog Modal */}
       {activeSlotModal && (
@@ -2015,12 +2458,15 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
           slotTitle={activeSlotModal.slotTitle}
           slotCategory={activeSlotModal.slotCategory}
           maxLevel={activeSlotModal.maxLevel}
-          ruleAttributes={Object.fromEntries(ALL_ATTRIBUTES.map(attr => [attr, baseAttributes[attr] + [5, 10, 15, 20].filter(level => level <= activeSlotModal.level && levelData[level]?.attributeBoosts.includes(attr)).length])) as Record<AttributeKey, number>}
+          ruleAttributes={computeAttributesAtLevel(baseAttributes, levelData, activeSlotModal.level).mods}
           ruleSkills={(() => {
             const ranks = Object.fromEntries(ALL_SKILLS.map(skill => [skill, initialTrainedSkills.has(skill) ? 1 : 0])) as Record<SkillKey, ProficiencyRank>;
             for (let level = 1; level <= activeSlotModal.level; level++) {
               Object.entries(levelData[level]?.feats || {}).forEach(([slot, feat]) => { if (level !== activeSlotModal.level || slot !== activeSlotModal.slotId) applyFeatSkillEffects(feat, ranks); });
-              (levelData[level]?.skillIncreases || []).forEach(skill => { ranks[skill] = Math.min(4, ranks[skill] + 1) as ProficiencyRank; });
+              (levelData[level]?.skillIncreases || []).forEach(skill => {
+                const cap = maxSkillRankForLevel(level);
+                if (ranks[skill] < cap) ranks[skill] = (ranks[skill] + 1) as ProficiencyRank;
+              });
               Object.entries(levelData[level]?.skillRankOverrides || {}).forEach(([skill, rank]) => { if (rank !== undefined) ranks[skill as SkillKey] = rank; });
             }
             return ranks;

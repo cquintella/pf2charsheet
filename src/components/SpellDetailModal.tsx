@@ -7,7 +7,7 @@ import { useI18n } from '../i18n/I18nContext';
 import { rarityLabel } from '../i18n/gameTerms';
 import { cleanDescriptionHtml } from '../utils/formatters';
 import { buildSpellFormulaContext } from '../utils/foundryFormula';
-import { useModalFocus, clickableProps } from '../utils/useModalFocus';
+import { useModalFocus } from '../utils/useModalFocus';
 import { X, Shield, Clock, Crosshair, Hourglass, BookOpen, Layers, Star, Camera, Scroll } from 'lucide-react';
 
 interface SpellDetailModalProps {

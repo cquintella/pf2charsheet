@@ -1,17 +1,7 @@
 import React from 'react';
 import { FeatItem } from '../types/pf2e';
 import { resolvePf2eIcon, cleanSnippetText } from '../utils/formatters';
-import { 
-  Star, 
-  Shield, 
-  Zap, 
-  BookOpen, 
-  Award, 
-  Sparkles, 
-  Clock, 
-  Check, 
-  Layers 
-} from 'lucide-react';
+import { Star } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
 import { rarityLabel } from '../i18n/gameTerms';
 import { clickableProps } from '../utils/useModalFocus';

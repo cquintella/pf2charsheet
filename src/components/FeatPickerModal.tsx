@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { FeatItem, FeatFilters, FeatSelectionRecord, AttributeKey, SkillKey, ProficiencyRank } from '../types/pf2e';
 import { evaluatePrerequisites, RequirementResult } from '../utils/featRules';
 import { fetchFeats } from '../services/api';
-import { resolvePf2eIcon, cleanSnippetText, cleanDescriptionHtml } from '../utils/formatters';
+import { resolvePf2eIcon, cleanDescriptionHtml } from '../utils/formatters';
 import { X, Search, Award, Check, Loader2 } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -39,6 +39,9 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
   const requirementText = (result: RequirementResult): string => result.unreadable ? t('picker.unreadable') : result.text;
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<string>(slotCategory === 'archetype' ? 'all' : slotCategory);
+  const [traitFilter, setTraitFilter] = useState<'all' | 'archetype' | 'multiclass' | 'dedication'>(
+    slotCategory === 'archetype' ? 'archetype' : 'all'
+  );
   const [ancestryScope, setAncestryScope] = useState<'character' | 'all'>('character');
   const [limit, setLimit] = useState(60);
   const [feats, setFeats] = useState<FeatItem[]>([]);
@@ -60,13 +63,15 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
     let active = true;
     setLoading(true);
 
-    // When category is ancestry and scoped to character ancestry, lock trait; otherwise show all ancestry/versatile heritage feats
+    // When category is ancestry and scoped to character ancestry, lock trait; otherwise apply archetype/multiclass/dedication filter
     const isAncestry = category === 'ancestry';
     const effectiveTrait = slotCategory === 'archetype'
-      ? 'archetype'
+      ? (traitFilter === 'all' ? 'archetype' : traitFilter)
+      : traitFilter !== 'all'
+      ? traitFilter
       : (isAncestry && ancestryTrait && ancestryScope === 'character')
-        ? ancestryTrait
-        : 'all';
+      ? ancestryTrait
+      : 'all';
 
     const filters: FeatFilters = {
       search,
@@ -98,7 +103,7 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
     return () => {
       active = false;
     };
-  }, [search, category, maxLevel, ancestryTrait, ancestryScope, slotCategory, limit]);
+  }, [search, category, traitFilter, maxLevel, ancestryTrait, ancestryScope, slotCategory, limit]);
 
   const selectFeat = (feat: FeatItem) => {
     let traits: string[] = [];
@@ -114,11 +119,27 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
       });
       return;
     }
-    const dedications = existingFeats.filter(f => {
+    const sortedExisting = [...existingFeats].sort((a, b) => a.takenAt - b.takenAt);
+    const dedications = sortedExisting.filter(f => {
       try { return (JSON.parse(f.traits || '[]') as string[]).includes('dedication'); } catch { return false; }
     });
+    const lastDedication = dedications[dedications.length - 1];
+    const archetypeFeatsAfterLast = lastDedication
+      ? sortedExisting.filter(f => {
+          if (f.takenAt < lastDedication.takenAt || f.featId === lastDedication.featId) return false;
+          try {
+            const ft = JSON.parse(f.traits || '[]') as string[];
+            return ft.includes('archetype') && !ft.includes('dedication');
+          } catch { return false; }
+        }).length
+      : 0;
     const messages = results.filter(result => result.status === 'unknown').map(result => t('picker.check', { text: requirementText(result) }));
-    if (traits.includes('dedication') && dedications.length) messages.push(t('picker.previousDedications', { list: dedications.map(f => f.featName).join(', ') }));
+    if (traits.includes('dedication') && dedications.length) {
+      messages.push(t('picker.previousDedications', { list: dedications.map(f => f.featName).join(', ') }));
+      if (archetypeFeatsAfterLast < 2) {
+        messages.push(t('picker.dedicationLimitWarning', { count: archetypeFeatsAfterLast }));
+      }
+    }
     if (traits.includes('archetype') && !traits.includes('dedication') && !results.some(result => /dedication$/i.test(result.text))) messages.push(t('picker.checkDedication'));
     if (messages.length) {
       setDialogState({
@@ -216,7 +237,28 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
           {/* Category Tabs */}
           <div className="flex items-center space-x-1 overflow-x-auto text-xs">
             {slotCategory === 'archetype' ? (
-              <span className="px-3 py-1.5 rounded-lg bg-accent text-black font-bold">{t('picker.archetypeFeats')}</span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {(
+                  [
+                    { id: 'archetype', label: t('picker.archetypeFeats') },
+                    { id: 'multiclass', label: t('picker.filterMulticlass') },
+                    { id: 'dedication', label: t('picker.filterDedication') },
+                  ] as const
+                ).map(tf => (
+                  <button
+                    key={tf.id}
+                    type="button"
+                    onClick={() => { setTraitFilter(tf.id); setLimit(60); }}
+                    className={`px-3 py-1.5 rounded-lg font-semibold transition-all whitespace-nowrap ${
+                      traitFilter === tf.id
+                        ? 'bg-accent text-black shadow'
+                        : 'bg-elevated text-text-secondary hover:text-white border border-border-strong'
+                    }`}
+                  >
+                    {tf.label}
+                  </button>
+                ))}
+              </div>
             ) : slotCategory === 'ancestry' ? (
               <div className="flex items-center gap-1.5 flex-wrap">
                 <button
@@ -254,16 +296,31 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
               ].filter((v, i, a) => a.findIndex(other => other.id === v.id) === i).map((c) => (
                 <button
                   key={c.id}
-                  onClick={() => setCategory(c.id)}
+                  onClick={() => { setCategory(c.id); setTraitFilter('all'); }}
                   className={`px-3 py-1.5 rounded-lg font-semibold transition-all whitespace-nowrap ${
-                    category === c.id
+                    category === c.id && traitFilter === 'all'
                       ? 'bg-accent text-black shadow'
                       : 'bg-elevated text-text-secondary hover:text-white border border-border-strong'
                   }`}
                 >
                   {c.label}
                 </button>
-              ))
+              )).concat(
+                (['archetype', 'multiclass', 'dedication'] as const).map(tf => (
+                  <button
+                    key={`trait_${tf}`}
+                    type="button"
+                    onClick={() => { setCategory('all'); setTraitFilter(prev => prev === tf ? 'all' : tf); }}
+                    className={`px-3 py-1.5 rounded-lg font-semibold transition-all whitespace-nowrap ${
+                      traitFilter === tf
+                        ? 'bg-accent text-black shadow'
+                        : 'bg-elevated text-text-secondary hover:text-white border border-border-strong'
+                    }`}
+                  >
+                    {t(tf === 'archetype' ? 'picker.filterArchetype' : tf === 'multiclass' ? 'picker.filterMulticlass' : 'picker.filterDedication')}
+                  </button>
+                ))
+              )
             )}
           </div>
         </div>

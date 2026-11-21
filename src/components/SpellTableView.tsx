@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { SpellItem } from '../types/pf2e';
 import { resolveSpellIcon } from '../utils/formatters';
-import { Shield, Clock, Crosshair, Star, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import { Star, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
 import { rarityLabel } from '../i18n/gameTerms';
 

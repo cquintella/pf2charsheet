@@ -6,7 +6,7 @@ import { FeatFiltersBar } from './FeatFiltersBar';
 import { FeatCard } from './FeatCard';
 import { FeatTableView } from './FeatTableView';
 import { FeatDetailModal } from './FeatDetailModal';
-import { Loader2, Award, Sparkles } from 'lucide-react';
+import { Loader2, Award } from 'lucide-react';
 
 const INITIAL_FEAT_FILTERS: FeatFilters = {
   search: '',
@@ -30,7 +30,6 @@ export const FeatExplorerView: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [selectedFeat, setSelectedFeat] = useState<FeatItem | null>(null);
-  const [expandedFeatId, setExpandedFeatId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
 
   // Favorites state persisted in localStorage

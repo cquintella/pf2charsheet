@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
 import { 
   AncestryItem, 
   BackgroundItem, 
   ClassItem, 
   AttributeKey, 
+  SkillKey,
   CharacterABCState 
 } from '../types/pf2e';
 import { 
@@ -17,16 +18,20 @@ import {
 import { 
   resolvePf2eIcon, 
   cleanSnippetText, 
-  cleanDescriptionHtml, 
   ALL_ATTRIBUTES, 
-  ATTRIBUTE_INFO
+  ATTRIBUTE_INFO,
+  ALL_SKILLS,
+  SKILL_INFO
 } from '../utils/formatters';
+import { computeInitialSkillBudget, deriveDefaultLoreSkills } from '../utils/skills';
+import { parseImportedCharacterJson } from '../utils/characterJson';
+import { SheetGuard } from './LevelProgressionView';
 import { useI18n } from '../i18n/I18nContext';
 import { ConfirmDialog } from './ConfirmDialog';
 import { PortraitPickerModal } from './PortraitPickerModal';
 import { getCharacterPortrait, resolvePortraitSrc } from '../utils/portrait';
 import { MessageKey } from '../i18n/Translator';
-import { attributeName, attributeShort, proficiencyWithBonus, signed, toProficiencyRank, rarityLabel } from '../i18n/gameTerms';
+import { attributeName, attributeShort, skillName, proficiencyWithBonus, signed, toProficiencyRank } from '../i18n/gameTerms';
 import { 
   User, 
   Shield, 
@@ -35,18 +40,16 @@ import {
   Eye, 
   Sparkles, 
   Check, 
-  RotateCcw, 
   Save, 
   Trash2, 
   ChevronRight, 
   ChevronLeft, 
   CheckCircle2, 
-  AlertCircle, 
   Award, 
   Search, 
   BookOpen,
   ArrowRight,
-  Info
+  Upload
 } from 'lucide-react';
 
 interface SavedCharacterRecord {
@@ -77,20 +80,23 @@ const INITIAL_CHARACTER_STATE: CharacterABCState = {
   backgroundBoostChoice2: null,
   selectedClass: null,
   classKeyAttributeChoice: null,
-  level1FreeBoosts: []
+  level1FreeBoosts: [],
+  selectedSkills: []
 };
 
 interface CharacterCreatorViewProps {
   onNavigateToLevels?: () => void;
   onCharacterSaved?: (savedId: string) => void;
+  onGuardChange?: (guard: SheetGuard | null) => void;
 }
 
 export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
   onNavigateToLevels,
-  onCharacterSaved
+  onCharacterSaved,
+  onGuardChange
 }) => {
   const { t } = useI18n();
-  // Wizard steps: 1: Ancestry, 2: Background, 3: Class, 4: Free Boosts, 5: Sheet & Save
+  // Wizard steps: 1: Ancestry, 2: Background, 3: Class, 4: Free Boosts, 5: Skills, 6: Sheet & Save
   const [currentStep, setCurrentStep] = useState<number>(1);
 
   // Compendium data from SQLite
@@ -113,6 +119,9 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
   const [charState, setCharState] = useState<CharacterABCState>(() => ({ ...INITIAL_CHARACTER_STATE, name: t('creator.defaultName') }));
   const [portrait, setPortrait] = useState<string | undefined>(undefined);
   const [isPortraitPickerOpen, setIsPortraitPickerOpen] = useState(false);
+  const savedSnapshot = useRef<string | null>(null);
+  const needsBaseline = useRef(true);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   // Search filters inside steps
   const [ancestrySearch, setAncestrySearch] = useState('');
@@ -388,6 +397,36 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
     };
   }, [charState, calculatedAttributes]);
 
+  const skillBudget = useMemo(
+    () => computeInitialSkillBudget(charState.background, charState.selectedClass, calculatedAttributes.int.mod),
+    [charState.background, charState.selectedClass, calculatedAttributes.int.mod]
+  );
+
+  const effectiveSelectedSkills = useMemo(() => {
+    const autoSet = new Set(skillBudget.autoTrained);
+    const filtered = (charState.selectedSkills || []).filter(s => !autoSet.has(s));
+    return filtered.slice(0, skillBudget.freeBudget);
+  }, [charState.selectedSkills, skillBudget]);
+
+  const allInitialTrainedSkills = useMemo(
+    () => Array.from(new Set<SkillKey>([...skillBudget.autoTrained, ...effectiveSelectedSkills])),
+    [skillBudget.autoTrained, effectiveSelectedSkills]
+  );
+
+  const toggleCreatorSkill = (skill: SkillKey) => {
+    if (skillBudget.autoTrained.includes(skill)) return;
+    const isSelected = effectiveSelectedSkills.includes(skill);
+    const updated = isSelected
+      ? effectiveSelectedSkills.filter(s => s !== skill)
+      : effectiveSelectedSkills.length < skillBudget.freeBudget
+      ? [...effectiveSelectedSkills, skill]
+      : effectiveSelectedSkills;
+    setCharState(prev => ({ ...prev, selectedSkills: updated }));
+  };
+
+  const creatorSnapshot = () => JSON.stringify({ editingId, charState, portrait });
+  const currentCreatorSnapshot = creatorSnapshot();
+
   // Save Character to SQLite (returns true on success)
   const handleSaveCharacter = async (): Promise<boolean> => {
     setSaving(true);
@@ -402,15 +441,10 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
         initLevels[i] = { level: i, attributeBoosts: [], skillIncreases: [], feats: {} };
       }
 
-      const initialTrainedSkills: string[] = [];
-      try {
-        const bgSkills = JSON.parse(charState.background?.skills || '[]');
-        if (Array.isArray(bgSkills)) {
-          bgSkills.forEach((s: unknown) => {
-            if (typeof s === 'string') initialTrainedSkills.push(s.toLowerCase());
-          });
-        }
-      } catch { /* ignore */ }
+      const nextCharState: CharacterABCState = {
+        ...charState,
+        selectedSkills: effectiveSelectedSkills
+      };
 
       const payload = {
         ...(editingId ? { id: editingId } : {}),
@@ -422,18 +456,20 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
         class: charState.selectedClass?.name || '',
         subclass: '',
         data: {
-          charState,
+          charState: nextCharState,
           portrait,
           baseAttributes,
           calculatedAttributes,
           derivedStats,
           progressionLevels: initLevels,
-          initialTrainedSkills: Array.from(new Set(initialTrainedSkills)),
+          initialTrainedSkills: allInitialTrainedSkills,
+          loreSkills: deriveDefaultLoreSkills(charState.background, charState.selectedClass),
         }
       };
 
       const res = await saveCharacter(payload);
       if (res.success) {
+        savedSnapshot.current = JSON.stringify({ editingId: res.id, charState: nextCharState, portrait });
         setEditingId(res.id);
         setSaveSuccessMsg(t('creator.savedOk'));
         const updatedList = await fetchCharacters();
@@ -461,13 +497,62 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
     try {
       const data = JSON.parse(rec.data_json || '{}');
       if (data.charState) {
+        needsBaseline.current = true;
         setEditingId(rec.id);
-        setCharState(data.charState);
+        const loadedState: CharacterABCState = data.charState;
+        if (!Array.isArray(loadedState.selectedSkills) && Array.isArray(data.initialTrainedSkills)) {
+          const intMod = typeof data.baseAttributes?.int === 'number' ? data.baseAttributes.int : 0;
+          const budget = computeInitialSkillBudget(loadedState.background, loadedState.selectedClass, intMod);
+          const autoSet = new Set<string>(budget.autoTrained);
+          const validSet = new Set<string>(ALL_SKILLS);
+          loadedState.selectedSkills = (data.initialTrainedSkills as unknown[])
+            .filter((s): s is SkillKey => typeof s === 'string' && validSet.has(s) && !autoSet.has(s));
+        }
+        setCharState(loadedState);
         setPortrait(typeof data.portrait === 'string' && data.portrait.trim() !== '' ? data.portrait : undefined);
-        setCurrentStep(5);
+        setCurrentStep(6);
       }
     } catch (e) {
       console.error('Erro ao ler dados do personagem salvo:', e);
+    }
+  };
+
+  useLayoutEffect(() => {
+    if (loading) return;
+    if (needsBaseline.current) {
+      savedSnapshot.current = currentCreatorSnapshot;
+      needsBaseline.current = false;
+    }
+    onGuardChange?.({
+      dirty: savedSnapshot.current !== null && savedSnapshot.current !== currentCreatorSnapshot,
+      save: handleSaveCharacter,
+    });
+  });
+
+  useEffect(() => () => onGuardChange?.(null), [onGuardChange]);
+
+  const handleImportJson = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const imported = parseImportedCharacterJson(text);
+      const res = await saveCharacter(imported);
+      if (res.success) {
+        const updatedList = await fetchCharacters();
+        setSavedCharacters(updatedList);
+        onCharacterSaved?.(res.id);
+        setSaveSuccessMsg(t('sheet.importJsonOk', { name: imported.name }));
+        setTimeout(() => setSaveSuccessMsg(null), 4000);
+      }
+    } catch (err) {
+      console.error('Erro ao importar JSON:', err);
+      setDialogState({
+        title: t('sheet.importJson'),
+        message: t('sheet.importJsonError'),
+        variant: 'alert',
+      });
     }
   };
 
@@ -605,7 +690,8 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
             { num: 2, label: t('creator.step.background'), icon: BookOpen, done: !!charState.background },
             { num: 3, label: t('creator.step.class'), icon: Award, done: !!charState.selectedClass },
             { num: 4, label: t('creator.step.freeBoosts'), icon: CheckCircle2, done: charState.level1FreeBoosts.length === 4 },
-            { num: 5, label: t('creator.step.summary'), icon: Save, done: false }
+            { num: 5, label: t('creator.step.skills'), icon: Award, done: !!charState.selectedClass && effectiveSelectedSkills.length === skillBudget.freeBudget },
+            { num: 6, label: t('creator.step.summary'), icon: Save, done: false }
           ].map(step => (
             <button
               key={step.num}
@@ -637,7 +723,7 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
               <span className="hidden sm:inline">{t('common.previous')}</span>
             </button>
           )}
-          {currentStep < 5 && (
+          {currentStep < 6 && (
             <button
               onClick={() => setCurrentStep(prev => prev + 1)}
               className="flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-hover text-xs font-bold text-black shadow"
@@ -820,6 +906,17 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
                             }
 
                             // Free / Choice boost
+                            const usedInOtherSlots = new Set<AttributeKey>();
+                            parsedAncestryBoosts.forEach(other => {
+                              if (other.slotKey === boost.slotKey) return;
+                              if (other.options.length === 1) {
+                                usedInOtherSlots.add(other.options[0]);
+                              } else {
+                                const chosen = charState.ancestryBoostChoices[other.slotKey];
+                                if (chosen) usedInOtherSlots.add(chosen);
+                              }
+                            });
+
                             return (
                               <div key={boost.slotKey} className="space-y-1">
                                 <label className="text-[11px] text-text-secondary">
@@ -838,7 +935,7 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
                                 >
                                   <option value="">{t('creator.selectAttribute')}</option>
                                   {boost.options.map(attr => (
-                                    <option key={attr} value={attr}>
+                                    <option key={attr} value={attr} disabled={usedInOtherSlots.has(attr)}>
                                       {attributeName(t, attr)} (+1 {attributeShort(t, attr)})
                                     </option>
                                   ))}
@@ -1074,8 +1171,12 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
                     <select
                       value={charState.backgroundBoostChoice1 || ''}
                       onChange={(e) => {
-                        const val = e.target.value as AttributeKey;
-                        setCharState(prev => ({ ...prev, backgroundBoostChoice1: val }));
+                        const val = (e.target.value || null) as AttributeKey | null;
+                        setCharState(prev => ({
+                          ...prev,
+                          backgroundBoostChoice1: val,
+                          backgroundBoostChoice2: prev.backgroundBoostChoice2 === val ? null : prev.backgroundBoostChoice2
+                        }));
                       }}
                       className="w-full bg-canvas border border-border-strong rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-accent"
                     >
@@ -1379,6 +1480,138 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
               onClick={() => setCurrentStep(5)}
               className="flex items-center space-x-1.5 px-5 py-2 bg-accent hover:bg-accent-hover text-black font-bold text-xs rounded-xl shadow"
             >
+              <span>{t('creator.goToSkills')}</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 5: PERÍCIAS INICIAIS (SKILLS) */}
+      {currentStep === 5 && (
+        <div className="bg-surface border border-border-strong rounded-2xl p-6 max-w-4xl mx-auto space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-border-strong">
+            <div>
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Award className="w-5 h-5 text-accent-text" />
+                <span>{t('creator.skillsTitle')}</span>
+              </h2>
+              <p className="text-xs text-text-secondary mt-1">
+                {charState.selectedClass
+                  ? t('creator.skillsHint', {
+                      count: skillBudget.freeBudget,
+                      base: skillBudget.classAdditional,
+                      int: signed(calculatedAttributes.int.mod),
+                      overlap: skillBudget.overlapCount > 0 ? t('creator.skillsOverlapNote', { count: skillBudget.overlapCount }) : ''
+                    })
+                  : t('creator.skillsNeedClass')}
+              </p>
+            </div>
+            {charState.selectedClass && (
+              <span className={`px-3 py-1.5 rounded-xl text-xs font-bold border self-start sm:self-center tabular-nums ${
+                effectiveSelectedSkills.length === skillBudget.freeBudget
+                  ? 'bg-status-success-bg text-status-success border-status-success-border'
+                  : 'bg-status-warn-bg text-status-warn border-status-warn-border'
+              }`}>
+                {t('creator.skillsSelectedCount', { selected: effectiveSelectedSkills.length, total: skillBudget.freeBudget })}
+              </span>
+            )}
+          </div>
+
+          {(skillBudget.bgLore.length > 0 || skillBudget.classCustom) && (
+            <div className="flex flex-wrap gap-2 text-xs">
+              {skillBudget.bgLore.length > 0 && (
+                <span className="px-2.5 py-1 rounded-lg bg-elevated border border-border-strong text-text-secondary">
+                  {t('creator.skillsLoreNote', { lore: skillBudget.bgLore.join(', ') })}
+                </span>
+              )}
+              {skillBudget.classCustom && (
+                <span className="px-2.5 py-1 rounded-lg bg-elevated border border-border-strong text-text-secondary">
+                  {t('creator.skillsCustomNote', { custom: skillBudget.classCustom })}
+                </span>
+              )}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+            {ALL_SKILLS.map(skill => {
+              const info = SKILL_INFO[skill];
+              const isFromBg = skillBudget.bgFixed.includes(skill);
+              const isFromClass = skillBudget.classFixed.includes(skill);
+              const isAuto = isFromBg || isFromClass;
+              const isChosen = effectiveSelectedSkills.includes(skill);
+              const isTrained = isAuto || isChosen;
+              const attrMod = calculatedAttributes[info.attribute].mod;
+              const previewTotal = attrMod + (isTrained ? 3 : 0);
+              const disabled = isAuto || (!isChosen && effectiveSelectedSkills.length >= skillBudget.freeBudget);
+
+              const sourceLabel = isFromBg && isFromClass
+                ? t('creator.skillsSourceBoth')
+                : isFromBg
+                ? t('creator.skillsSourceBg')
+                : isFromClass
+                ? t('creator.skillsSourceClass')
+                : null;
+
+              return (
+                <button
+                  key={skill}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => toggleCreatorSkill(skill)}
+                  className={`p-3 rounded-xl border text-left transition-all flex items-center justify-between gap-2 ${
+                    isAuto
+                      ? 'bg-status-success-bg/50 border-status-success-border text-white cursor-default'
+                      : isChosen
+                      ? 'bg-elevated border-accent text-white shadow-sm'
+                      : disabled
+                      ? 'bg-inset/60 border-border-subtle text-text-muted opacity-60 cursor-not-allowed'
+                      : 'bg-inset border-border-subtle text-text-secondary hover:border-border-strong hover:text-white'
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold truncate">{skillName(t, skill)}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-[11px] text-text-muted uppercase">{attributeShort(t, info.attribute)}</span>
+                      {sourceLabel && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-success-bg text-status-success border border-status-success-border font-semibold">
+                          {sourceLabel}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className={`text-xs font-black tabular-nums ${isTrained ? 'text-accent-text' : 'text-text-muted'}`}>
+                      {signed(previewTotal)}
+                    </span>
+                    <div className={`w-5 h-5 rounded-md border flex items-center justify-center ${
+                      isAuto
+                        ? 'bg-status-success border-status-success text-black'
+                        : isChosen
+                        ? 'bg-accent border-accent text-black'
+                        : 'border-border-strong bg-canvas'
+                    }`}>
+                      {isTrained && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex justify-between pt-4 border-t border-border-strong">
+            <button
+              onClick={() => setCurrentStep(4)}
+              className="px-4 py-2 bg-elevated hover:bg-control text-xs font-semibold text-white rounded-xl border border-border-strong"
+            >
+              {t('creator.backToBoosts')}
+            </button>
+            <button
+              onClick={() => setCurrentStep(6)}
+              className="flex items-center space-x-1.5 px-5 py-2 bg-accent hover:bg-accent-hover text-black font-bold text-xs rounded-xl shadow"
+            >
               <span>{t('creator.viewSummary')}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
@@ -1386,8 +1619,8 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
         </div>
       )}
 
-      {/* STEP 5: FICHA RESUMIDA & SALVAR (SUMMARY) */}
-      {currentStep === 5 && (
+      {/* STEP 6: FICHA RESUMIDA & SALVAR (SUMMARY) */}
+      {currentStep === 6 && (
         <div className="space-y-6">
           {saveSuccessMsg && (
             <div className="p-4 bg-status-success-bg/80 border border-status-success-border rounded-xl text-status-success text-sm font-semibold flex items-center space-x-2">
@@ -1576,15 +1809,68 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
                   </div>
                 </div>
               </div>
+
+              {/* Trained Skills Summary Card */}
+              <div className="bg-surface border border-border-strong rounded-2xl p-6 space-y-3">
+                <h3 className="text-base font-bold text-white flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <Award className="w-4 h-4 text-accent-text" />
+                    {t('creator.trainedSkillsSummary')}
+                  </span>
+                  <span className="text-xs font-semibold text-text-secondary tabular-nums">
+                    {allInitialTrainedSkills.length}
+                  </span>
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {allInitialTrainedSkills.map(skill => {
+                    const info = SKILL_INFO[skill];
+                    const total = calculatedAttributes[info.attribute].mod + 3;
+                    return (
+                      <span
+                        key={skill}
+                        className="px-2.5 py-1 rounded-lg bg-elevated border border-border-strong text-xs font-semibold text-white flex items-center gap-1.5"
+                      >
+                        <span>{skillName(t, skill)}</span>
+                        <span className="text-accent-text font-black tabular-nums">{signed(total)}</span>
+                      </span>
+                    );
+                  })}
+                  {skillBudget.bgLore.map(lore => (
+                    <span key={lore} className="px-2.5 py-1 rounded-lg bg-inset border border-border-subtle text-xs text-text-secondary">
+                      {lore}
+                    </span>
+                  ))}
+                  {skillBudget.classCustom && (
+                    <span className="px-2.5 py-1 rounded-lg bg-inset border border-border-subtle text-xs text-text-secondary">
+                      {skillBudget.classCustom}
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Right 4 Cols: Saved Characters in SQLite */}
             <div className="lg:col-span-4 bg-surface border border-border-strong rounded-2xl p-5 space-y-4 h-fit">
-              <div className="flex items-center justify-between pb-3 border-b border-border-strong">
+              <div className="flex items-center justify-between pb-3 border-b border-border-strong gap-2">
                 <h3 className="font-bold text-white text-sm flex items-center gap-1.5">
                   <User className="w-4 h-4 text-accent-text" />
                   {t('creator.savedCharacters', { count: savedCharacters.length })}
                 </h3>
+                <button
+                  type="button"
+                  onClick={() => importInputRef.current?.click()}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-elevated hover:bg-control border border-border-strong text-[11px] font-bold text-accent-text transition-colors"
+                >
+                  <Upload className="w-3 h-3" />
+                  <span>{t('sheet.importJson')}</span>
+                </button>
+                <input
+                  ref={importInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={handleImportJson}
+                  className="hidden"
+                />
               </div>
 
               {savedCharacters.length === 0 ? (

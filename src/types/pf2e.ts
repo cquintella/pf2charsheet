@@ -192,6 +192,8 @@ export interface CharacterABCState {
   classKeyAttributeChoice: AttributeKey | null; // chosen key attribute
   // Level 1 Free Boosts (4 distinct attributes)
   level1FreeBoosts: AttributeKey[];
+  // Level 1 Free Trained Skills (additional + INT + overlap)
+  selectedSkills?: SkillKey[];
 }
 
 // Level Progression Types
@@ -215,6 +217,24 @@ export type SkillKey =
 
 export type ProficiencyRank = 0 | 1 | 2 | 3 | 4; // 0: Untrained, 1: Trained, 2: Expert, 3: Master, 4: Legendary
 
+export interface LoreSkillEntry {
+  id: string;
+  name: string;
+  rank: ProficiencyRank;
+}
+
+export type HpProgressionMode = 'full' | 'average' | 'roll';
+
+export interface CharacterSpellcastingState {
+  tradition: string;
+  ability: AttributeKey;
+  proficiency: ProficiencyRank;
+  spellbookId?: string;
+  slotsMax: Record<number, number>;
+  slotsUsed: Record<number, number>;
+  signatureSpells: string[];
+}
+
 export interface FeatSelectionRecord {
   prerequisites?: string;
   system_json?: string;
@@ -234,6 +254,7 @@ export interface LevelProgressionData {
   attributeBoosts: AttributeKey[]; // up to 4 selected at 5, 10, 15, 20
   skillIncreases: SkillKey[]; // skills upgraded at this level
   skillRankOverrides?: Partial<Record<SkillKey, ProficiencyRank>>; // manual rank at this level
+  hpRoll?: number; // rolled hit die value for levels 2..20 when hpMode === 'roll'
   feats: Record<string, FeatSelectionRecord>; // slotKey -> FeatSelectionRecord
 }
 

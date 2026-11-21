@@ -8,10 +8,7 @@ import {
   Star, 
   LayoutGrid, 
   List, 
-  Award,
-  Zap,
-  Shield,
-  BookOpen
+  Award
 } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
 import { MessageKey } from '../i18n/Translator';

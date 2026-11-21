@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
 import { SpellItem, Spellbook, SpellFilters, SpellMetadata } from '../types/pf2e';
 import { 
   fetchSpells, 
@@ -19,10 +19,6 @@ import {
   Check, 
   FolderPlus, 
   Download, 
-  FileText,
-  Clock,
-  Shield,
-  Layers,
   ChevronRight,
   Printer
 } from 'lucide-react';
@@ -31,15 +27,18 @@ import { TarotPrintView } from './TarotPrintView';
 import { ConfirmDialog } from './ConfirmDialog';
 import { IconButton } from './IconButton';
 import { useI18n } from '../i18n/I18nContext';
+import { SheetGuard } from './LevelProgressionView';
 
 interface SpellbookBuilderViewProps {
   metadata: SpellMetadata | null;
   onSelectSpellForDetail: (spell: SpellItem) => void;
+  onGuardChange?: (guard: SheetGuard | null) => void;
 }
 
 export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
   metadata,
-  onSelectSpellForDetail
+  onSelectSpellForDetail,
+  onGuardChange
 }) => {
   const { t } = useI18n();
   // Spellbooks list & active spellbook
@@ -63,6 +62,8 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
 
   // Selected spells in active spellbook (Map of ID -> SpellItem)
   const [selectedSpellsMap, setSelectedSpellsMap] = useState<Record<string, SpellItem>>({});
+  const savedSnapshot = useRef<string | null>(null);
+  const needsBaseline = useRef(true);
 
   // Load list of spellbooks from SQLite on mount
   const loadSpellbooksList = async () => {
@@ -88,6 +89,7 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
     setLoadingBook(true);
     try {
       const sb = await fetchSpellbookById(id);
+      needsBaseline.current = true;
       setActiveSpellbook(sb);
       const map: Record<string, SpellItem> = {};
       if (sb.spells) {
@@ -173,9 +175,20 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
     }
   };
 
+  const spellbookSnapshot = () => JSON.stringify({
+    id: activeSpellbook?.id || '',
+    name: activeSpellbook?.name || '',
+    tradition: activeSpellbook?.tradition || '',
+    caster_class: activeSpellbook?.caster_class || '',
+    description: activeSpellbook?.description || '',
+    spellIds: Object.keys(selectedSpellsMap).sort(),
+  });
+  const currentSpellbookSnapshot = spellbookSnapshot();
+
   // Save current active spellbook to SQLite
-  const handleSaveSpellbook = async () => {
-    if (!activeSpellbook) return;
+  const handleSaveSpellbook = async (): Promise<boolean> => {
+    if (!activeSpellbook) return true;
+    const savedState = spellbookSnapshot();
     setSaving(true);
     try {
       const spellIds = Object.keys(selectedSpellsMap);
@@ -186,16 +199,33 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
         description: activeSpellbook.description,
         spells: spellIds
       });
+      savedSnapshot.current = savedState;
       setSaveStatus(t('spellbook.savedOk'));
       setTimeout(() => setSaveStatus(''), 3000);
       loadSpellbooksList();
+      return true;
     } catch (err) {
       console.error('Erro ao salvar:', err);
       setSaveStatus(t('spellbook.saveError'));
+      return false;
     } finally {
       setSaving(false);
     }
   };
+
+  useLayoutEffect(() => {
+    if (loadingBook || !activeSpellbook) return;
+    if (needsBaseline.current) {
+      savedSnapshot.current = currentSpellbookSnapshot;
+      needsBaseline.current = false;
+    }
+    onGuardChange?.({
+      dirty: savedSnapshot.current !== null && savedSnapshot.current !== currentSpellbookSnapshot,
+      save: handleSaveSpellbook,
+    });
+  });
+
+  useEffect(() => () => onGuardChange?.(null), [onGuardChange]);
 
   // Delete active spellbook
   const handleDeleteSpellbook = async () => {
@@ -308,6 +338,62 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
                 className="py-1.5 px-3 bg-elevated border border-border-strong focus:border-accent rounded-lg text-sm text-white font-medium outline-none flex-1"
               />
               <select
+                value={activeSpellbook.caster_class || 'Wizard'}
+                aria-label={t('spellbook.casterPreset')}
+                onChange={(e) => {
+                  const caster = e.target.value;
+                  const presetTraditions: Record<string, string> = {
+                    Wizard: 'arcane',
+                    'Wizard Dedication': 'arcane',
+                    Magus: 'arcane',
+                    'Magus Dedication': 'arcane',
+                    Cleric: 'divine',
+                    'Cleric Dedication': 'divine',
+                    Oracle: 'divine',
+                    'Oracle Dedication': 'divine',
+                    Druid: 'primal',
+                    'Druid Dedication': 'primal',
+                    Bard: 'occult',
+                    'Bard Dedication': 'occult',
+                    Psychic: 'occult',
+                    'Psychic Dedication': 'occult',
+                    Sorcerer: 'all',
+                    'Sorcerer Dedication': 'all',
+                    Witch: 'all',
+                    'Witch Dedication': 'all',
+                    Summoner: 'all',
+                    'Summoner Dedication': 'all',
+                    'Multiclass Archetype': 'all',
+                  };
+                  const nextTrad = presetTraditions[caster] ?? activeSpellbook.tradition;
+                  setActiveSpellbook({ ...activeSpellbook, caster_class: caster, tradition: nextTrad });
+                  setSelectedTradition(nextTrad);
+                }}
+                className="py-1.5 px-2 bg-elevated border border-border-strong rounded-lg text-xs font-semibold text-white focus:border-accent outline-none"
+              >
+                <option value="Wizard">Wizard (Arcane)</option>
+                <option value="Cleric">Cleric (Divine)</option>
+                <option value="Druid">Druid (Primal)</option>
+                <option value="Bard">Bard (Occult)</option>
+                <option value="Sorcerer">Sorcerer</option>
+                <option value="Witch">Witch</option>
+                <option value="Oracle">Oracle (Divine)</option>
+                <option value="Psychic">Psychic (Occult)</option>
+                <option value="Magus">Magus (Arcane)</option>
+                <option value="Summoner">Summoner</option>
+                <option value="Wizard Dedication">Wizard Dedication</option>
+                <option value="Cleric Dedication">Cleric Dedication</option>
+                <option value="Druid Dedication">Druid Dedication</option>
+                <option value="Bard Dedication">Bard Dedication</option>
+                <option value="Sorcerer Dedication">Sorcerer Dedication</option>
+                <option value="Witch Dedication">Witch Dedication</option>
+                <option value="Oracle Dedication">Oracle Dedication</option>
+                <option value="Psychic Dedication">Psychic Dedication</option>
+                <option value="Magus Dedication">Magus Dedication</option>
+                <option value="Summoner Dedication">Summoner Dedication</option>
+                <option value="Multiclass Archetype">Multiclass Archetype</option>
+              </select>
+              <select
                 value={activeSpellbook.tradition}
                 onChange={(e) => {
                   const trad = e.target.value;
@@ -316,6 +402,7 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
                 }}
                 className="py-1.5 px-2 bg-elevated border border-border-strong rounded-lg text-xs font-semibold text-white focus:border-accent outline-none capitalize"
               >
+                <option value="all">{t('tradition.all')}</option>
                 <option value="arcane">{t('tradition.arcane')}</option>
                 <option value="divine">{t('tradition.divine')}</option>
                 <option value="occult">{t('tradition.occult')}</option>

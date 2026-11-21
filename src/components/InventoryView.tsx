@@ -7,12 +7,46 @@ import { cleanDescriptionHtml } from '../utils/formatters';
 
 interface Props {
   inventory: CharacterInventory;
+  strMod?: number;
   onChange: (inventory: CharacterInventory) => void;
+}
+
+function computeInventoryBulk(inventory: CharacterInventory, strMod: number) {
+  let fullBulk = 0;
+  let lightBulk = 0;
+
+  for (const entry of inventory.items) {
+    const raw = (entry.item.bulk || '').trim().toLowerCase();
+    const qty = Math.max(0, entry.quantity || 0);
+    if (!raw || raw === '-' || raw === '0' || qty === 0) continue;
+    if (raw === 'l' || raw === '0.1') {
+      lightBulk += qty;
+    } else {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        const whole = Math.floor(parsed);
+        const frac = parsed - whole;
+        fullBulk += whole * qty;
+        if (frac > 0) lightBulk += Math.round(frac * 10) * qty;
+      }
+    }
+  }
+
+  const totalCoins = (inventory.coins.pp || 0) + (inventory.coins.gp || 0) + (inventory.coins.sp || 0) + (inventory.coins.cp || 0);
+  const coinBulk = Math.floor(totalCoins / 1000);
+  const totalBulk = fullBulk + Math.floor(lightBulk / 10) + coinBulk;
+  const remainderLight = lightBulk % 10;
+  const encumberedLimit = Math.max(0, 5 + strMod);
+  const maxLimit = Math.max(0, 10 + strMod);
+  const status: 'normal' | 'encumbered' | 'overloaded' =
+    totalBulk > maxLimit ? 'overloaded' : totalBulk > encumberedLimit ? 'encumbered' : 'normal';
+
+  return { totalBulk, remainderLight, encumberedLimit, maxLimit, status };
 }
 
 const inputClass = 'bg-inset border border-border-strong rounded-lg px-2 py-1.5 text-sm text-white';
 
-export const InventoryView: React.FC<Props> = ({ inventory, onChange }) => {
+export const InventoryView: React.FC<Props> = ({ inventory, strMod = 0, onChange }) => {
   const { t } = useI18n();
   const [search, setSearch] = useState('');
   const [type, setType] = useState('all');
@@ -57,7 +91,31 @@ export const InventoryView: React.FC<Props> = ({ inventory, onChange }) => {
   const update = (id: string, patch: Partial<InventoryEntry>) => onChange({ ...inventory, items: inventory.items.map(entry => entry.id === id ? { ...entry, ...patch } : entry) });
 
   return <section className="bg-surface border border-border-strong rounded-2xl p-5 space-y-5">
-    <h3 className="text-lg font-bold text-white">{t('inventory.title')}</h3>
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <h3 className="text-lg font-bold text-white">{t('inventory.title')}</h3>
+      {(() => {
+        const bulkInfo = computeInventoryBulk(inventory, strMod);
+        const badgeClass =
+          bulkInfo.status === 'overloaded'
+            ? 'bg-status-danger-bg text-status-danger border-status-danger-border'
+            : bulkInfo.status === 'encumbered'
+            ? 'bg-status-warn-bg text-status-warn border-status-warn-border'
+            : 'bg-elevated text-text-primary border-border-strong';
+        return (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className={`px-2.5 py-1 rounded-lg border font-bold tabular-nums ${badgeClass}`}>
+              {t('inventory.bulkLabel')}: {t('inventory.bulkValue', { bulk: bulkInfo.totalBulk, light: bulkInfo.remainderLight })} • {t(`inventory.bulkStatus.${bulkInfo.status}`)}
+            </span>
+            <span className="px-2 py-1 rounded-lg bg-inset border border-border-subtle text-text-secondary tabular-nums">
+              {t('inventory.bulkEncumberedAt', { limit: bulkInfo.encumberedLimit })}
+            </span>
+            <span className="px-2 py-1 rounded-lg bg-inset border border-border-subtle text-text-secondary tabular-nums">
+              {t('inventory.bulkMaxAt', { limit: bulkInfo.maxLimit })}
+            </span>
+          </div>
+        );
+      })()}
+    </div>
     <div className="flex flex-wrap gap-3">
       {(['pp', 'gp', 'sp', 'cp'] as const).map(key => <label key={key} className="text-xs text-text-secondary flex flex-col gap-1">{t(`coin.${key}`)}
         <input aria-label={t('inventory.coinsOf', { coin: t(`coin.${key}`) })} type="number" min="0" step="1" className={`${inputClass} w-24`} value={inventory.coins[key]} onChange={event => onChange({ ...inventory, coins: { ...inventory.coins, [key]: Math.max(0, Math.floor(Number(event.target.value) || 0)) } })} />
