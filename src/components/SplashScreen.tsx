@@ -25,7 +25,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onDone, durationMs =
   return (
     <div
       role="status"
-      aria-label="PF2ECharSheet v1.0.0"
+      aria-label="PF2ECharSheet v10.0.1"
       className={`fixed inset-0 z-[120] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 transition-opacity duration-400 ${
         fading ? 'opacity-0 pointer-events-none' : 'opacity-100'
       }`}
@@ -40,7 +40,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onDone, durationMs =
           <div className="space-y-1">
             <p className="text-sm font-bold text-white tracking-wide">
               by <span className="text-accent-text">cquintella</span>
-              <span className="ml-2 text-xs font-semibold text-text-secondary">v1.0.0</span>
+              <span className="ml-2 text-xs font-semibold text-text-secondary">v10.0.1</span>
             </p>
             <a
               href="https://github.com/cquintella/pf2charsheet"

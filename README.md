@@ -69,5 +69,5 @@ npm run dist:all    # Prepare clean compendium DB + build Electron packages (mac
 
 If this project helps your Pathfinder 2e table, consider supporting its development:
 
-- **Pix**: `TODO: add Pix key`
-- **PayPal**: `TODO: add PayPal account / link`
+- **Pix**: `caquintella@gmail.com` (R$ 10 suggested)
+- **PayPal**: `caquintella@gmail.com` ($2 suggested)

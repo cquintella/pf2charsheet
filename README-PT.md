@@ -69,5 +69,5 @@ npm run dist:all    # Prepara banco limpo + gera pacotes Electron (macOS, Window
 
 Se este projeto ajuda a sua mesa de Pathfinder 2e, considere apoiar o desenvolvimento:
 
-- **Pix**: `TODO: informar chave Pix`
-- **PayPal**: `TODO: informar conta / link PayPal`
+- **Pix**: `caquintella@gmail.com` (sugestão: R$ 10)
+- **PayPal**: `caquintella@gmail.com` (sugestão: US$ 2)
