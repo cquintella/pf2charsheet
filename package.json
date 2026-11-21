@@ -105,7 +105,7 @@
     "autoprefixer": "^10.4.20",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
-    "electron": "^33.0.0",
+    "electron": "^42.11.16",
     "electron-builder": "^26.18.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.13",
