@@ -16,3 +16,9 @@ if (existingItems === 0) {
 } else {
   console.log('Banco existente preservado; importação automática ignorada.');
 }
+
+const customCreatures = spawnSync(process.execPath, [path.join(__dirname, 'import-custom-creatures.cjs')], { stdio: 'inherit' });
+if (customCreatures.status !== 0) {
+  console.error('Falha ao importar criaturas locais.');
+  process.exit(customCreatures.status || 1);
+}

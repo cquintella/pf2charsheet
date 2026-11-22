@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { X } from 'lucide-react';
+import { Image as ImageIcon, Trash2, Upload, X } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
 import { Locale, SUPPORTED_LOCALES, isLocale } from '../i18n/Translator';
 import { useModalFocus } from '../utils/useModalFocus';
@@ -7,9 +7,11 @@ import { PortraitDbSource } from '../utils/portrait';
 import { HpProgressionMode } from '../types/pf2e';
 
 export type ThemeName = 'current' | 'light' | 'dark';
+export type WallpaperMode = 'scaled' | 'tiled';
 
 const THEMES: readonly ThemeName[] = ['current', 'light', 'dark'];
 const HP_MODES: readonly HpProgressionMode[] = ['full', 'average', 'roll'];
+const WALLPAPER_MODES: readonly WallpaperMode[] = ['scaled', 'tiled'];
 const selectClass = 'rounded-lg border border-border-strong bg-control px-3 py-1.5 text-sm text-white';
 
 interface GeneralSettingsFieldsProps {
@@ -19,6 +21,10 @@ interface GeneralSettingsFieldsProps {
   onPortraitDbChange?: (source: PortraitDbSource) => void;
   hpMode?: HpProgressionMode;
   onHpModeChange?: (mode: HpProgressionMode) => void;
+  wallpaperImage?: string | null;
+  onWallpaperImageChange?: (dataUrl: string | null) => void;
+  wallpaperMode?: WallpaperMode;
+  onWallpaperModeChange?: (mode: WallpaperMode) => void;
 }
 
 /** Application-wide preferences (theme, language, portrait database, and game options). */
@@ -29,8 +35,47 @@ export const GeneralSettingsFields: React.FC<GeneralSettingsFieldsProps> = ({
   onPortraitDbChange,
   hpMode = 'full',
   onHpModeChange,
+  wallpaperImage = null,
+  onWallpaperImageChange,
+  wallpaperMode = 'scaled',
+  onWallpaperModeChange,
 }) => {
   const { t, locale, setLocale } = useI18n();
+  const wallpaperInputRef = useRef<HTMLInputElement>(null);
+
+  const handleWallpaperUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !onWallpaperImageChange) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const raw = typeof reader.result === 'string' ? reader.result : '';
+      if (!raw) return;
+      // Keep small images/textures untouched; downscale large PNGs so they fit in localStorage.
+      if (raw.length <= 900_000) {
+        onWallpaperImageChange(raw);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1920;
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          onWallpaperImageChange(raw);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        onWallpaperImageChange(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.onerror = () => onWallpaperImageChange(raw);
+      img.src = raw;
+    };
+    reader.readAsDataURL(file);
+  };
   return <>
     <div className="flex items-center justify-between gap-4 border-t border-border-strong pt-4">
       <label htmlFor="display-theme" className="text-sm font-semibold text-white">{t('settings.theme')}</label>
@@ -92,6 +137,64 @@ export const GeneralSettingsFields: React.FC<GeneralSettingsFieldsProps> = ({
         </div>
       </div>
     )}
+    {onWallpaperImageChange && (
+      <div className="border-t border-border-strong pt-4 space-y-3">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <span className="text-sm font-semibold text-white flex items-center gap-1.5">
+              <ImageIcon className="w-4 h-4 text-accent-text" />
+              <span>{t('settings.wallpaper')}</span>
+            </span>
+            <p className="text-xs text-text-secondary">{t('settings.wallpaperHint')}</p>
+          </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <input
+              ref={wallpaperInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleWallpaperUpload}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => wallpaperInputRef.current?.click()}
+              className="flex items-center gap-1.5 rounded-lg border border-border-strong bg-control hover:bg-control-hover px-3 py-1.5 text-xs font-semibold text-white transition-colors"
+            >
+              <Upload className="w-3.5 h-3.5 text-accent-text" />
+              <span>{t('settings.wallpaper.upload')}</span>
+            </button>
+            {wallpaperImage && (
+              <button
+                type="button"
+                onClick={() => onWallpaperImageChange(null)}
+                title={t('settings.wallpaper.remove')}
+                aria-label={t('settings.wallpaper.remove')}
+                className="rounded-lg border border-status-danger-border bg-status-danger-bg p-1.5 text-status-danger hover:opacity-90 transition-opacity"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+        {wallpaperImage && onWallpaperModeChange && (
+          <div className="flex items-center justify-between gap-4">
+            <label htmlFor="wallpaper-display-mode" className="text-xs font-semibold text-text-secondary">
+              {t('settings.wallpaper.mode')}
+            </label>
+            <select
+              id="wallpaper-display-mode"
+              value={wallpaperMode}
+              onChange={event => onWallpaperModeChange(event.target.value as WallpaperMode)}
+              className={selectClass}
+            >
+              {WALLPAPER_MODES.map(mode => (
+                <option key={mode} value={mode}>{t(`settings.wallpaper.${mode}`)}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+    )}
   </>;
 };
 
@@ -99,7 +202,19 @@ interface SettingsModalProps extends GeneralSettingsFieldsProps {
   onClose: () => void;
 }
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ theme, onThemeChange, portraitDb, onPortraitDbChange, hpMode, onHpModeChange, onClose }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({
+  theme,
+  onThemeChange,
+  portraitDb,
+  onPortraitDbChange,
+  hpMode,
+  onHpModeChange,
+  wallpaperImage,
+  onWallpaperImageChange,
+  wallpaperMode,
+  onWallpaperModeChange,
+  onClose,
+}) => {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalFocus(dialogRef, onClose);
@@ -110,7 +225,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ theme, onThemeChan
         <h2 id="settings-title" className="text-lg font-bold text-white">{t('settings.title')}</h2>
         <button type="button" autoFocus onClick={onClose} aria-label={t('common.close')} className="p-2 rounded-lg text-text-secondary hover:text-white hover:bg-control"><X className="w-5 h-5" /></button>
       </div>
-      <GeneralSettingsFields theme={theme} onThemeChange={onThemeChange} portraitDb={portraitDb} onPortraitDbChange={onPortraitDbChange} hpMode={hpMode} onHpModeChange={onHpModeChange} />
+      <GeneralSettingsFields
+        theme={theme}
+        onThemeChange={onThemeChange}
+        portraitDb={portraitDb}
+        onPortraitDbChange={onPortraitDbChange}
+        hpMode={hpMode}
+        onHpModeChange={onHpModeChange}
+        wallpaperImage={wallpaperImage}
+        onWallpaperImageChange={onWallpaperImageChange}
+        wallpaperMode={wallpaperMode}
+        onWallpaperModeChange={onWallpaperModeChange}
+      />
     </div>
   </div>;
 };

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { execFileSync } from 'node:child_process';
 
 const rootDir = process.cwd();
 const sourceDb = path.join(rootDir, 'pf2e.db');
@@ -14,6 +15,7 @@ if (!fs.existsSync(sourceDb)) {
 
 fs.mkdirSync(outDir, { recursive: true });
 fs.copyFileSync(sourceDb, cleanDb);
+execFileSync(process.execPath, [path.join(rootDir, 'scripts/import-custom-creatures.cjs'), `--db=${cleanDb}`], { stdio: 'inherit' });
 
 const db = new DatabaseSync(cleanDb);
 db.exec('DELETE FROM characters; DELETE FROM spellbooks; VACUUM;');

@@ -1,0 +1,32 @@
+{
+  "id": "custom-tigone",
+  "name": "Tigone",
+  "slug": "tigone",
+  "level": 4,
+  "size": "lg",
+  "traits": ["beast"],
+  "hp": 60,
+  "ac": 21,
+  "fortitude": 13,
+  "reflex": 11,
+  "will": 8,
+  "perception": 12,
+  "speed": 30,
+  "senses": ["low-light vision", "scent (imprecise) 30 feet"],
+  "description": "<p>Tigones are large, feline creatures which are dark green in color and have black or yellowish-brown vertical striping. Growing to a length of 7’, they can weigh over 250 pounds. Native of the Hinterlands, tigones have been known to roam the Ringing Mountains. They are fearful predators and will attack almost any creature violating their territory. Because of their coloration, a tigone is almost impossible to see when holding perfectly still in the underbrush. They also move very quietly through any terrain. They dislike warm environments and soon die if forced into the desert.</p><p>Highly sought for gladiatorial games, most tigones do not survive the trip across the desert. They bring a handsome price if successfully transported to a sorcerer-king’s city. Halflings prize tigones as hunting partners because of their psionic tracking and hunting skills.</p><hr><p><strong>Skills</strong> Acrobatics +11, Athletics +13, Stealth +13</p><p><strong>Attributes</strong> Str +5, Dex +3, Con +3, Int −4, Wis +2, Cha +2</p><p><strong>Melee</strong> jaws +13, damage 1d10+7 piercing plus Grab</p><p><strong>Melee</strong> claw +13 (agile), damage 1d8+7 slashing</p><p><strong>Occult Innate Spells</strong> DC 18, attack +10; blur; charm, mindlink; daze, warp step</p><p><strong>Pounce</strong> The tigone Strides and makes a Strike at the end of that movement. If the tigone began this action hidden, it remains hidden until after this ability's Strike.</p><p><strong>Sneak Attack</strong> The tigone deals 1d6 extra precision damage to off-guard creatures.</p><p><strong>Wrestle</strong> The tigone makes a claw Strike against a creature it is grabbing. If the attack hits, that creature is knocked prone.</p>",
+  "system": {
+    "abilities": {
+      "str": { "mod": 5 },
+      "dex": { "mod": 3 },
+      "con": { "mod": 3 },
+      "int": { "mod": -4 },
+      "wis": { "mod": 2 },
+      "cha": { "mod": 2 }
+    },
+    "skills": {
+      "acrobatics": { "mod": 11 },
+      "athletics": { "mod": 13 },
+      "stealth": { "mod": 13 }
+    }
+  }
+}

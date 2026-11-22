@@ -128,6 +128,19 @@ export interface AncestryItem {
   rarity?: Rarity;
 }
 
+export interface HeritageItem {
+  id: string;
+  name: string;
+  slug: string;
+  ancestry_name: string | null;
+  ancestry_slug: string | null;
+  traits: string; // JSON string
+  description: string;
+  system_json: string;
+  img?: string;
+  rarity?: Rarity;
+}
+
 export interface BackgroundItem {
   id: string;
   name: string;
@@ -178,6 +191,7 @@ export interface CharacterABCState {
   level: number;
   // A: Ancestry
   ancestry: AncestryItem | null;
+  heritage?: HeritageItem | null;
   useAlternativeBoosts: boolean; // 2 free boosts instead of fixed
   ancestryBoostChoices: Record<string, AttributeKey>; // slot index -> chosen attribute
   useVoluntaryFlaw: boolean;
@@ -236,6 +250,7 @@ export interface CharacterSpellcastingState {
 }
 
 export interface FeatSelectionRecord {
+  choices?: Record<string, string>;
   prerequisites?: string;
   system_json?: string;
   description?: string;
@@ -253,6 +268,7 @@ export interface LevelProgressionData {
   level: number;
   attributeBoosts: AttributeKey[]; // up to 4 selected at 5, 10, 15, 20
   skillIncreases: SkillKey[]; // skills upgraded at this level
+  attributeOverrides?: Partial<Record<AttributeKey, number>>;
   skillRankOverrides?: Partial<Record<SkillKey, ProficiencyRank>>; // manual rank at this level
   hpRoll?: number; // rolled hit die value for levels 2..20 when hpMode === 'roll'
   feats: Record<string, FeatSelectionRecord>; // slotKey -> FeatSelectionRecord
@@ -308,6 +324,28 @@ export interface CharacterStrike {
   traits: string;
 }
 
+export interface CreatureItem {
+  id: string;
+  name: string;
+  slug: string;
+  level: number;
+  size: string;
+  traits: string;
+  rarity: Rarity;
+  hp: number;
+  ac: number;
+  fortitude: number;
+  reflex: number;
+  will: number;
+  perception: number;
+  speed: number;
+  senses: string;
+  img?: string;
+  source?: string;
+  description: string;
+  system_json: string;
+}
+
 export type VisionType = 'normal' | 'low-light-vision' | 'darkvision' | 'greater-darkvision';
 
 export type CompanionKind = 'animal' | 'familiar' | 'eidolon' | 'construct';
@@ -321,6 +359,8 @@ export interface CharacterCompanion {
   size: string;
   speed: number;
   vision: VisionType;
+  visionRange?: string;
+  skills?: Partial<Record<SkillKey, number>>;
   senses: string;
   currentHp: number;
   maxHp: number;

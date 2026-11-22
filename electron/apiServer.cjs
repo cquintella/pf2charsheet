@@ -155,6 +155,79 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
       }
     }
 
+    // HERITAGES ENDPOINT
+    if (pathname === '/api/heritages' && method === 'GET') {
+      try {
+        const ancestrySlug = (parsedUrl.searchParams.get('ancestry') || '').trim().toLowerCase();
+        const rows = ancestrySlug
+          ? db.prepare(`
+              SELECT h.*, i.img, i.rarity
+              FROM heritages h
+              JOIN items i ON h.id = i.id
+              WHERE LOWER(COALESCE(h.ancestry_slug, '')) = ? OR h.ancestry_slug IS NULL OR h.ancestry_slug = ''
+              ORDER BY CASE WHEN LOWER(COALESCE(h.ancestry_slug, '')) = ? THEN 0 ELSE 1 END, h.name ASC
+            `).all(ancestrySlug, ancestrySlug)
+          : db.prepare(`
+              SELECT h.*, i.img, i.rarity
+              FROM heritages h
+              JOIN items i ON h.id = i.id
+              ORDER BY h.name ASC
+            `).all();
+        return sendJson(res, rows);
+      } catch (err) {
+        return sendJson(res, { error: err.message }, 500);
+      }
+    }
+
+    // CREATURES (ANIMALS) COMPENDIUM ENDPOINT
+    if (pathname === '/api/creatures' && method === 'GET') {
+      try {
+        const search = (parsedUrl.searchParams.get('search') || '').trim();
+        const letter = (parsedUrl.searchParams.get('letter') || '').trim().toLowerCase();
+        const level = parsedUrl.searchParams.get('level') || '';
+        const size = (parsedUrl.searchParams.get('size') || '').trim().toLowerCase();
+        const rarity = (parsedUrl.searchParams.get('rarity') || '').trim().toLowerCase();
+        const trait = (parsedUrl.searchParams.get('trait') || '').trim().toLowerCase();
+        const limit = Math.min(200, Math.max(1, parseInt(parsedUrl.searchParams.get('limit') || '48', 10) || 48));
+        const offset = Math.max(0, parseInt(parsedUrl.searchParams.get('offset') || '0', 10) || 0);
+
+        const where = [];
+        const params = [];
+        if (search) {
+          where.push('(LOWER(name) LIKE ? OR LOWER(traits) LIKE ? OR LOWER(description) LIKE ?)');
+          const term = `%${search.toLowerCase()}%`;
+          params.push(term, term, term);
+        }
+        if (/^[a-z]$/.test(letter)) {
+          where.push('LOWER(name) LIKE ?');
+          params.push(`${letter}%`);
+        }
+        if (level !== '' && level !== 'all') {
+          where.push('level = ?');
+          params.push(parseInt(level, 10));
+        }
+        if (size && size !== 'all') {
+          where.push('LOWER(size) = ?');
+          params.push(size);
+        }
+        if (rarity && rarity !== 'all') {
+          where.push('LOWER(rarity) = ?');
+          params.push(rarity);
+        }
+        if (trait && trait !== 'all') {
+          where.push('LOWER(traits) LIKE ?');
+          params.push(`%"${trait}"%`);
+        }
+
+        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+        const countRow = db.prepare(`SELECT COUNT(*) as total FROM animals ${whereSql}`).get(...params);
+        const rows = db.prepare(`SELECT * FROM animals ${whereSql} ORDER BY level ASC, name ASC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+        return sendJson(res, { total: countRow?.total || 0, creatures: rows });
+      } catch (err) {
+        return sendJson(res, { error: err.message }, 500);
+      }
+    }
+
     // BACKGROUNDS ENDPOINT
     if (pathname === '/api/backgrounds' && method === 'GET') {
       try {

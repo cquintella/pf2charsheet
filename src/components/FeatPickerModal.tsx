@@ -11,6 +11,8 @@ import { useModalFocus, clickableProps } from '../utils/useModalFocus';
 interface FeatPickerModalProps {
   ruleAttributes: Record<AttributeKey, number>;
   ruleSkills: Record<SkillKey, ProficiencyRank>;
+  orderNames?: string[];
+  incompleteOrders?: boolean;
   existingFeats: (FeatSelectionRecord & { takenAt: number })[];
   slotTitle: string;
   slotCategory: 'ancestry' | 'class' | 'skill' | 'general' | string;
@@ -18,6 +20,7 @@ interface FeatPickerModalProps {
   selectedFeatId?: string | null;
   ancestryTrait?: string | null;
   ancestryName?: string | null;
+  extraAncestryTraits?: string[];
   onSelectFeat: (feat: FeatItem) => void;
   onClose: () => void;
 }
@@ -26,12 +29,15 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
   existingFeats,
   ruleAttributes,
   ruleSkills,
+  orderNames,
+  incompleteOrders,
   slotTitle,
   slotCategory,
   maxLevel,
   selectedFeatId,
   ancestryTrait,
   ancestryName,
+  extraAncestryTraits = [],
   onSelectFeat,
   onClose
 }) => {
@@ -42,7 +48,7 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
   const [traitFilter, setTraitFilter] = useState<'all' | 'archetype' | 'multiclass' | 'dedication'>(
     slotCategory === 'archetype' ? 'archetype' : 'all'
   );
-  const [ancestryScope, setAncestryScope] = useState<'character' | 'all'>('character');
+  const [ancestryScope, setAncestryScope] = useState<string>('character');
   const [limit, setLimit] = useState(60);
   const [feats, setFeats] = useState<FeatItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -69,8 +75,8 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
       ? (traitFilter === 'all' ? 'archetype' : traitFilter)
       : traitFilter !== 'all'
       ? traitFilter
-      : (isAncestry && ancestryTrait && ancestryScope === 'character')
-      ? ancestryTrait
+      : (isAncestry && ancestryScope !== 'all')
+      ? (ancestryScope === 'character' ? (ancestryTrait || 'all') : ancestryScope)
       : 'all';
 
     const filters: FeatFilters = {
@@ -109,7 +115,7 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
     let traits: string[] = [];
     try { traits = JSON.parse(feat.traits || '[]'); } catch { /* Dados ausentes. */ }
     if (slotCategory === 'archetype' && !traits.includes('archetype')) return;
-    const results = evaluatePrerequisites(feat.prerequisites, { attributes: ruleAttributes, skills: ruleSkills, feats: existingFeats });
+    const results = evaluatePrerequisites(feat.prerequisites, { attributes: ruleAttributes, skills: ruleSkills, feats: existingFeats, orderNames, incompleteOrders });
     const unmet = results.filter(result => result.status === 'unmet');
     if (unmet.length) {
       setDialogState({
@@ -273,6 +279,22 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
                   <Award className="w-3.5 h-3.5" />
                   <span>{t('picker.featsOf', { ancestry: ancestryName || t('common.ancestry') })}</span>
                 </button>
+                {extraAncestryTraits
+                  .filter(tr => tr && tr !== ancestryTrait?.toLowerCase())
+                  .map(tr => (
+                    <button
+                      key={tr}
+                      type="button"
+                      onClick={() => { setAncestryScope(tr); setLimit(60); }}
+                      className={`px-3 py-1.5 rounded-lg font-semibold capitalize transition-all whitespace-nowrap ${
+                        ancestryScope === tr
+                          ? 'bg-accent text-black shadow'
+                          : 'bg-elevated text-text-secondary hover:text-white border border-border-strong'
+                      }`}
+                    >
+                      {tr}
+                    </button>
+                  ))}
                 <button
                   type="button"
                   onClick={() => { setAncestryScope('all'); setLimit(60); }}
@@ -345,7 +367,7 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
             feats.map((feat) => {
               let traits: string[] = [];
               try { traits = JSON.parse(feat.traits || '[]'); } catch { /* ignore */ }
-              const requirementResults = evaluatePrerequisites(feat.prerequisites, { attributes: ruleAttributes, skills: ruleSkills, feats: existingFeats });
+              const requirementResults = evaluatePrerequisites(feat.prerequisites, { attributes: ruleAttributes, skills: ruleSkills, feats: existingFeats, orderNames, incompleteOrders });
               const isSelected = selectedFeatId === feat.id;
               const isPreviewed = previewFeat?.id === feat.id;
               const hasUnmet = requirementResults.some(r => r.status === 'unmet');
@@ -400,7 +422,7 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
             {previewFeat ? (() => {
               let traits: string[] = [];
               try { traits = JSON.parse(previewFeat.traits || '[]'); } catch { /* ignore */ }
-              const reqs = evaluatePrerequisites(previewFeat.prerequisites, { attributes: ruleAttributes, skills: ruleSkills, feats: existingFeats });
+              const reqs = evaluatePrerequisites(previewFeat.prerequisites, { attributes: ruleAttributes, skills: ruleSkills, feats: existingFeats, orderNames, incompleteOrders });
               const isSelected = selectedFeatId === previewFeat.id;
               return (
                 <div className="space-y-4">

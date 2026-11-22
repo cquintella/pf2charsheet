@@ -1,15 +1,17 @@
 import React from 'react';
-import { AttributeKey, CharacterCompanion, CompanionKind, VisionType } from '../types/pf2e';
-import { ALL_ATTRIBUTES } from '../utils/formatters';
-import { attributeShort, signed } from '../i18n/gameTerms';
+import { AttributeKey, CharacterCompanion, CompanionKind, VisionType, SkillKey } from '../types/pf2e';
+import { ALL_ATTRIBUTES, ALL_SKILLS } from '../utils/formatters';
+import { attributeShort, signed, skillName } from '../i18n/gameTerms';
 import { useI18n } from '../i18n/I18nContext';
 import { IconButton } from './IconButton';
-import { Eye, Footprints, Heart, PawPrint, Plus, Shield, Sparkles, Star, Swords, Trash2 } from 'lucide-react';
+import { Eye, Footprints, Heart, PawPrint, Plus, Save, Shield, Sparkles, Star, Swords, Trash2 } from 'lucide-react';
 
 interface CompanionViewProps {
   companions: CharacterCompanion[];
   characterLevel: number;
   onChange: (next: CharacterCompanion[]) => void;
+  onSave: () => Promise<boolean>;
+  saving: boolean;
 }
 
 const COMPANION_KINDS: readonly CompanionKind[] = ['animal', 'familiar', 'eidolon', 'construct'];
@@ -25,6 +27,8 @@ function createDefaultCompanion(level: number, defaultName: string): CharacterCo
     size: 'med',
     speed: 25,
     vision: 'low-light-vision',
+    visionRange: '',
+    skills: {},
     senses: '',
     currentHp: 14,
     maxHp: 14,
@@ -40,7 +44,7 @@ function createDefaultCompanion(level: number, defaultName: string): CharacterCo
   };
 }
 
-export const CompanionView: React.FC<CompanionViewProps> = ({ companions, characterLevel, onChange }) => {
+export const CompanionView: React.FC<CompanionViewProps> = ({ companions, characterLevel, onChange, onSave, saving }) => {
   const { t } = useI18n();
 
   const updateOne = (id: string, patch: Partial<CharacterCompanion>) => {
@@ -58,6 +62,16 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
           <PawPrint className="w-4 h-4 text-accent-text" />
           <span>{t('companion.title')}</span>
         </h3>
+        <div className="flex flex-wrap items-center gap-2 print:hidden">
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => { void onSave(); }}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-control hover:bg-control-hover text-text-primary text-xs font-bold disabled:opacity-50"
+        >
+          <Save className="w-3.5 h-3.5" />
+          {saving ? t('common.saving') : t('companion.save')}
+        </button>
         <button
           type="button"
           onClick={() => onChange([...companions, createDefaultCompanion(characterLevel, t('companion.kind.animal'))])}
@@ -66,6 +80,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
           <Plus className="w-3.5 h-3.5" />
           <span>{t('companion.add')}</span>
         </button>
+        </div>
       </div>
 
       {companions.length === 0 ? (
@@ -260,7 +275,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                     />
                   </label>
 
-                  <label className="col-span-2 sm:col-span-4 space-y-1">
+                  <label className="col-span-2 sm:col-span-3 space-y-1">
                     <span className="text-[11px] font-bold uppercase text-text-muted flex items-center gap-1">
                       <Sparkles className="w-3.5 h-3.5 text-accent-text" /> {t('sheet.vision')}
                     </span>
@@ -277,7 +292,17 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                     </select>
                   </label>
 
-                  <label className="col-span-2 sm:col-span-4 space-y-1">
+                  <label className="col-span-1 sm:col-span-2 space-y-1">
+                    <span className="text-[11px] font-bold uppercase text-text-muted block">{t('companion.visionRange')}</span>
+                    <input
+                      type="text"
+                      value={comp.visionRange || ''}
+                      onChange={(e) => updateOne(comp.id, { visionRange: e.target.value })}
+                      className="w-full bg-inset border border-border-strong rounded-lg px-2.5 py-1.5 text-xs text-text-primary"
+                    />
+                  </label>
+
+                  <label className="col-span-1 sm:col-span-3 space-y-1">
                     <span className="text-[11px] font-bold uppercase text-text-muted block">{t('sheet.sensesPlaceholder')}</span>
                     <input
                       type="text"
@@ -287,6 +312,43 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                       className="w-full bg-inset border border-border-strong rounded-lg px-2.5 py-1.5 text-xs text-text-primary placeholder:text-text-muted"
                     />
                   </label>
+                </div>
+
+                <div className="bg-surface border border-border-subtle rounded-xl p-3 space-y-2">
+                  <span className="text-[11px] font-bold uppercase text-text-secondary">{t('companion.skills')}</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {ALL_SKILLS.map((skill: SkillKey) => {
+                      const selected = Object.prototype.hasOwnProperty.call(comp.skills || {}, skill);
+                      return (
+                        <div key={skill} className="flex items-center justify-between gap-2 bg-inset border border-border-subtle rounded-lg px-2 py-1">
+                          <label className="flex items-center gap-2 text-xs text-text-primary">
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={(event) => {
+                                const skills = { ...comp.skills };
+                                if (event.target.checked) skills[skill] = 0;
+                                else delete skills[skill];
+                                updateOne(comp.id, { skills });
+                              }}
+                            />
+                            {skillName(t, skill)}
+                          </label>
+                          {selected && (
+                            <input
+                              type="number"
+                              aria-label={t('companion.skillModifier', { skill: skillName(t, skill) })}
+                              value={comp.skills?.[skill] ?? 0}
+                              onChange={(event) => updateOne(comp.id, {
+                                skills: { ...comp.skills, [skill]: Math.trunc(Number(event.target.value) || 0) },
+                              })}
+                              className="w-16 bg-surface border border-border-strong rounded px-1 py-0.5 text-xs text-text-primary text-center"
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* 4. Ações em Combate: Ataques & Benefício de Suporte */}

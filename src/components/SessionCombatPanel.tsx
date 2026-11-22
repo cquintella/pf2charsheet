@@ -1,6 +1,7 @@
 import React from 'react';
 import { SessionState } from '../utils/conditions';
 import { useI18n } from '../i18n/I18nContext';
+import { LevelSquares } from './LevelSquares';
 import { Heart, Shield, Sparkles, Skull, AlertTriangle } from 'lucide-react';
 
 interface SessionCombatPanelProps {
@@ -139,84 +140,78 @@ export const SessionCombatPanel: React.FC<SessionCombatPanelProps> = ({ session,
 
         {/* Coluna Direita: Cápsula Dying & Wounded + Conditions */}
         <div className="lg:col-span-6 bg-inset border border-border-subtle rounded-xl p-3 space-y-3">
-        <div className="grid grid-cols-2 gap-2.5">
-          <div className="bg-surface border border-border-subtle rounded-xl p-2.5 space-y-1">
-            <span className="text-[11px] font-bold uppercase text-text-muted flex items-center gap-1">
-              <Skull className="w-3.5 h-3.5 text-status-danger" />
-              {t('session.dying')}
-            </span>
-            <div className="flex items-center justify-between">
-              <button type="button" onClick={() => onChange({ ...session, dying: Math.max(0, session.dying - 1) })} className="px-2.5 py-0.5 rounded bg-elevated text-text-primary text-xs font-bold">-</button>
-              <span className="font-black text-base text-text-primary tabular-nums">{session.dying}</span>
-              <button type="button" onClick={() => onChange({ ...session, dying: Math.min(4, session.dying + 1) })} className="px-2.5 py-0.5 rounded bg-elevated text-text-primary text-xs font-bold">+</button>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2.5">
+            <div className="bg-surface border border-border-subtle rounded-xl p-2.5 space-y-1">
+              <span className="text-[11px] font-bold uppercase text-text-muted flex items-center gap-1">
+                <Skull className="w-3.5 h-3.5 text-status-danger" />
+                {t('session.dying')}
+              </span>
+              <LevelSquares
+                label={t('session.dying')}
+                value={session.dying}
+                max={4}
+                onChange={value => onChange({ ...session, dying: value })}
+              />
+            </div>
+
+            <div className="bg-surface border border-border-subtle rounded-xl p-2.5 space-y-1">
+              <span className="text-[11px] font-bold uppercase text-text-muted flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5 text-status-warn" />
+                {t('session.wounded')}
+              </span>
+              <LevelSquares
+                label={t('session.wounded')}
+                value={session.wounded}
+                max={3}
+                onChange={value => onChange({ ...session, wounded: value })}
+              />
             </div>
           </div>
 
-          <div className="bg-surface border border-border-subtle rounded-xl p-2.5 space-y-1">
-            <span className="text-[11px] font-bold uppercase text-text-muted flex items-center gap-1">
-              <AlertTriangle className="w-3.5 h-3.5 text-status-warn" />
-              {t('session.wounded')}
-            </span>
-            <div className="flex items-center justify-between">
-              <button type="button" onClick={() => onChange({ ...session, wounded: Math.max(0, session.wounded - 1) })} className="px-2.5 py-0.5 rounded bg-elevated text-text-primary text-xs font-bold">-</button>
-              <span className="font-black text-base text-text-primary tabular-nums">{session.wounded}</span>
-              <button type="button" onClick={() => onChange({ ...session, wounded: Math.min(3, session.wounded + 1) })} className="px-2.5 py-0.5 rounded bg-elevated text-text-primary text-xs font-bold">+</button>
+          <div className="pt-2.5 border-t border-border-subtle space-y-2">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+              <span className="text-[11px] font-bold uppercase text-text-muted">{t('session.conditions')}</span>
+              <span className="text-[11px] text-text-muted">{t('session.clearLevelHint')}</span>
             </div>
-          </div>
-        </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => onChange({ ...session, conditions: { ...session.conditions, offGuard: !session.conditions.offGuard } })}
+                aria-pressed={session.conditions.offGuard}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors text-left ${
+                  session.conditions.offGuard
+                    ? 'bg-status-danger-bg text-status-danger border-status-danger-border'
+                    : 'bg-surface text-text-secondary border-border-subtle hover:border-border-strong'
+                }`}
+              >
+                {t('session.condition.offGuard')}
+              </button>
 
-        <div className="pt-2.5 border-t border-border-subtle space-y-2">
-          <span className="text-[11px] font-bold uppercase text-text-muted block">{t('session.conditions')}</span>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => onChange({ ...session, conditions: { ...session.conditions, offGuard: !session.conditions.offGuard } })}
-              aria-pressed={session.conditions.offGuard}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors text-left ${
-                session.conditions.offGuard
-                  ? 'bg-status-danger-bg text-status-danger border-status-danger-border'
-                  : 'bg-surface text-text-secondary border-border-subtle hover:border-border-strong'
-              }`}
-            >
-              {t('session.condition.offGuard')}
-            </button>
+              {VALUE_CONDITIONS.map(key => {
+                const value = session.conditions[key];
+                const label = t(`session.condition.${key}`);
 
-            {VALUE_CONDITIONS.map(key => {
-              const val = session.conditions[key];
-              return (
-                <div
-                  key={key}
-                  className={`flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg text-xs border ${
-                    val > 0
-                      ? 'bg-status-warn-bg text-status-warn border-status-warn-border font-bold'
-                      : 'bg-surface text-text-secondary border-border-subtle'
-                  }`}
-                >
-                  <span className="truncate">{t(`session.condition.${key}`)}</span>
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <button
-                      type="button"
-                      aria-label={`${t(`session.condition.${key}`)} -`}
-                      onClick={() => onChange({ ...session, conditions: { ...session.conditions, [key]: Math.max(0, val - 1) } })}
-                      className="px-1.5 py-0.5 rounded bg-elevated hover:bg-control font-bold"
-                    >
-                      -
-                    </button>
-                    <span className="tabular-nums min-w-[14px] text-center">{val}</span>
-                    <button
-                      type="button"
-                      aria-label={`${t(`session.condition.${key}`)} +`}
-                      onClick={() => onChange({ ...session, conditions: { ...session.conditions, [key]: Math.min(4, val + 1) } })}
-                      className="px-1.5 py-0.5 rounded bg-elevated hover:bg-control font-bold"
-                    >
-                      +
-                    </button>
+                return (
+                  <div
+                    key={key}
+                    className={`flex flex-wrap items-center justify-between gap-x-2 rounded-lg px-2.5 py-1 text-xs border ${
+                      value > 0
+                        ? 'bg-status-warn-bg text-status-warn border-status-warn-border font-bold'
+                        : 'bg-surface text-text-secondary border-border-subtle'
+                    }`}
+                  >
+                    <span>{label}</span>
+                    <LevelSquares
+                      label={label}
+                      value={value}
+                      max={4}
+                      onChange={level => onChange({ ...session, conditions: { ...session.conditions, [key]: level } })}
+                    />
                   </div>
-                </div>
-              );
-            })}
-          </div>
-          </div>
+                );
+              })}
+            </div>
+              </div>
         </div>
       </div>
     </div>

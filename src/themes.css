@@ -13,80 +13,80 @@ html[data-theme="current"] {
   --text-primary: 230 237 243;
   --text-secondary: 198 209 222;
   --text-muted: 142 154 168;
-  --accent: 224 168 69;
-  --accent-hover: 243 199 109;
-  --accent-text: 224 168 69;
+  --accent: 249 115 22;
+  --accent-hover: 251 146 60;
+  --accent-text: 251 146 60;
   --accent-contrast: 17 24 39;
 
   --status-success: 110 231 183;
-  --status-success-bg: 6 78 59;
-  --status-success-border: 6 95 70;
+  --status-success-bg: 15 48 42;
+  --status-success-border: 20 83 70;
   --status-danger: 252 165 165;
-  --status-danger-bg: 69 10 10;
-  --status-danger-border: 127 29 29;
-  --status-warn: 248 184 109;
-  --status-warn-bg: 66 41 17;
-  --status-warn-border: 147 91 28;
+  --status-danger-bg: 54 19 24;
+  --status-danger-border: 115 36 42;
+  --status-warn: 253 186 116;
+  --status-warn-bg: 56 34 18;
+  --status-warn-border: 135 71 28;
   --status-info: 147 197 253;
-  --status-info-bg: 23 37 84;
-  --status-info-border: 30 58 138;
-  --status-purple: 233 213 255;
-  --status-purple-bg: 59 7 100;
-  --status-purple-border: 107 33 168;
+  --status-info-bg: 22 36 68;
+  --status-info-border: 37 64 120;
+  --status-purple: 216 180 254;
+  --status-purple-bg: 43 22 68;
+  --status-purple-border: 88 42 135;
 }
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  --bg-canvas: 8 8 8;
+  --bg-canvas: 10 10 10;
   --bg-surface: 20 20 20;
-  --bg-elevated: 31 31 31;
-  --bg-inset: 13 13 13;
-  --bg-control: 42 42 42;
-  --bg-control-hover: 58 58 58;
-  --border-subtle: 52 52 52;
-  --border-strong: 82 82 82;
-  --text-primary: 243 244 246;
-  --text-secondary: 209 213 219;
-  --text-muted: 156 163 175;
-  --accent: 224 168 69;
-  --accent-hover: 243 199 109;
-  --accent-text: 224 168 69;
+  --bg-elevated: 30 29 27;
+  --bg-inset: 14 14 13;
+  --bg-control: 42 40 36;
+  --bg-control-hover: 58 55 49;
+  --border-subtle: 52 48 41;
+  --border-strong: 82 74 58;
+  --text-primary: 243 242 238;
+  --text-secondary: 212 208 200;
+  --text-muted: 156 150 139;
+  --accent: 217 164 65;
+  --accent-hover: 237 189 92;
+  --accent-text: 229 179 84;
   --accent-contrast: 17 24 39;
 
-  --status-success: 110 231 183;
-  --status-success-bg: 6 78 59;
-  --status-success-border: 6 95 70;
-  --status-danger: 252 165 165;
-  --status-danger-bg: 69 10 10;
-  --status-danger-border: 127 29 29;
-  --status-warn: 248 184 109;
-  --status-warn-bg: 66 41 17;
-  --status-warn-border: 147 91 28;
-  --status-info: 147 197 253;
-  --status-info-bg: 23 37 84;
-  --status-info-border: 30 58 138;
-  --status-purple: 233 213 255;
-  --status-purple-bg: 59 7 100;
-  --status-purple-border: 107 33 168;
+  --status-success: 167 215 189;
+  --status-success-bg: 24 30 26;
+  --status-success-border: 48 74 58;
+  --status-danger: 235 168 168;
+  --status-danger-bg: 34 23 23;
+  --status-danger-border: 92 46 46;
+  --status-warn: 229 185 114;
+  --status-warn-bg: 34 29 21;
+  --status-warn-border: 108 82 40;
+  --status-info: 186 196 212;
+  --status-info-bg: 26 27 30;
+  --status-info-border: 62 68 78;
+  --status-purple: 204 186 226;
+  --status-purple-bg: 29 25 34;
+  --status-purple-border: 74 58 94;
 }
 
 html[data-theme="light"] {
   color-scheme: light;
-  --bg-canvas: 240 243 247;
+  --bg-canvas: 241 245 249;
   --bg-surface: 255 255 255;
-  --bg-elevated: 229 235 242;
-  --bg-inset: 246 248 251;
-  --bg-control: 218 226 236;
-  --bg-control-hover: 199 210 224;
+  --bg-elevated: 226 234 244;
+  --bg-inset: 246 249 253;
+  --bg-control: 214 226 240;
+  --bg-control-hover: 191 213 238;
   --border-subtle: 203 213 225;
   --border-strong: 148 163 184;
-  --text-primary: 17 24 39;
+  --text-primary: 15 23 42;
   --text-secondary: 51 65 85;
   --text-muted: 71 85 105;
-  --accent: 217 151 38;
-  --accent-hover: 232 171 62;
-  --accent-text: 138 82 0;
-  --accent-contrast: 17 24 39;
+  --accent: 37 99 235;
+  --accent-hover: 29 78 216;
+  --accent-text: 29 78 216;
+  --accent-contrast: 255 255 255;
 
   --status-success: 6 95 70;
   --status-success-bg: 209 250 229;
@@ -110,6 +110,7 @@ html[data-theme="light"] {
     color: rgb(var(--text-primary)) !important;
   }
 
+  html[data-theme="light"] .bg-accent.text-black,
   html[data-theme="light"] .bg-accent .text-white,
   html[data-theme="light"] .bg-\[\#e0a845\] .text-white {
     color: rgb(var(--accent-contrast)) !important;

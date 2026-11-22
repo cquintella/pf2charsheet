@@ -81,6 +81,19 @@ export function resolvePf2eIcon(img: string | undefined, defaultIcon: string = '
     .replace(/^icons\//, '/assets/icons/');
 }
 
+const CUSTOM_CLASS_ICONS: Record<string, string> = {
+  necromancer: '/assets/icons/classes/necromancer.svg',
+};
+
+export function resolveClassIcon(cls: { name?: string; slug?: string; img?: string }): string {
+  const key = (cls.slug || cls.name || '').trim().toLowerCase();
+  const isDefault = !cls.img || cls.img.trim() === '' || cls.img.includes('default-icons/class.svg');
+  if (isDefault && CUSTOM_CLASS_ICONS[key]) {
+    return CUSTOM_CLASS_ICONS[key];
+  }
+  return resolvePf2eIcon(cls.img, '/assets/icons/default-icons/class.svg');
+}
+
 import { FormulaContext, formatFoundryInlineTokens } from './foundryFormula';
 
 export function cleanDescriptionHtml(html: string, ctx: FormulaContext = {}): string {

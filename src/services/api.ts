@@ -4,7 +4,9 @@ import {
   SpellMetadata, 
   Spellbook, 
   AncestryItem, 
-  BackgroundItem, 
+  HeritageItem,
+  CreatureItem,
+  BackgroundItem,  
   ClassItem,
   FeatItem,
   FeatFilters,
@@ -151,6 +153,37 @@ export async function fetchFeatById(id: string): Promise<FeatItem> {
 export async function fetchAncestries(): Promise<AncestryItem[]> {
   const res = await fetch('/api/ancestries');
   if (!res.ok) throw new Error('Falha ao obter ancestralidades');
+  return res.json();
+}
+
+export async function fetchHeritages(ancestrySlug?: string): Promise<HeritageItem[]> {
+  const query = ancestrySlug ? `?ancestry=${encodeURIComponent(ancestrySlug)}` : '';
+  const res = await fetch(`/api/heritages${query}`);
+  if (!res.ok) throw new Error('Falha ao obter heranças');
+  return res.json();
+}
+
+export async function fetchCreatures(filters: {
+  search?: string;
+  letter?: string;
+  level?: string;
+  size?: string;
+  rarity?: string;
+  trait?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<{ total: number; creatures: CreatureItem[] }> {
+  const params = new URLSearchParams();
+  if (filters.search) params.set('search', filters.search);
+  if (filters.letter && filters.letter !== 'all') params.set('letter', filters.letter);
+  if (filters.level && filters.level !== 'all') params.set('level', filters.level);
+  if (filters.size && filters.size !== 'all') params.set('size', filters.size);
+  if (filters.rarity && filters.rarity !== 'all') params.set('rarity', filters.rarity);
+  if (filters.trait && filters.trait !== 'all') params.set('trait', filters.trait);
+  params.set('limit', String(filters.limit ?? 48));
+  params.set('offset', String(filters.offset ?? 0));
+  const res = await fetch(`/api/creatures?${params.toString()}`);
+  if (!res.ok) throw new Error('Falha ao buscar criaturas');
   return res.json();
 }
 

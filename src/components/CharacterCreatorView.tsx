@@ -1,29 +1,38 @@
 import React, { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
 import { 
   AncestryItem, 
-  BackgroundItem, 
+  HeritageItem,
+  BackgroundItem,  
   ClassItem, 
   AttributeKey, 
   SkillKey,
-  CharacterABCState 
+  CharacterABCState,
+  FeatItem
 } from '../types/pf2e';
 import { 
   fetchAncestries, 
+  fetchHeritages,
   fetchBackgrounds, 
   fetchClasses, 
   fetchCharacters, 
+  fetchFeats,
+  fetchFeatById,
   saveCharacter, 
   deleteCharacter 
 } from '../services/api';
 import { 
   resolvePf2eIcon, 
+  resolveClassIcon,
   cleanSnippetText, 
   ALL_ATTRIBUTES, 
   ATTRIBUTE_INFO,
   ALL_SKILLS,
   SKILL_INFO
 } from '../utils/formatters';
+import { CharacterDetails } from '../utils/characterDetails';
+import { ProgressionChoiceCatalog } from '../utils/progressionChoices';
 import { computeInitialSkillBudget, deriveDefaultLoreSkills } from '../utils/skills';
+import { hasSkilledHumanSkill, isVersatileHeritage } from '../utils/heritage';
 import { parseImportedCharacterJson } from '../utils/characterJson';
 import { SheetGuard } from './LevelProgressionView';
 import { useI18n } from '../i18n/I18nContext';
@@ -70,6 +79,7 @@ const INITIAL_CHARACTER_STATE: CharacterABCState = {
   name: '',
   level: 1,
   ancestry: null,
+  heritage: null,
   useAlternativeBoosts: false,
   ancestryBoostChoices: {},
   useVoluntaryFlaw: false,
@@ -106,6 +116,7 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
   const [savedCharacters, setSavedCharacters] = useState<SavedCharacterRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
+  const [showPendingChoices, setShowPendingChoices] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
   const [dialogState, setDialogState] = useState<{
     title: string;
@@ -116,7 +127,20 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
 
   // Character creation state
   const [editingId, setEditingId] = useState<string | null>(null);
+  const loadedCharacter = useRef<SavedCharacterRecord | null>(null);
   const [charState, setCharState] = useState<CharacterABCState>(() => ({ ...INITIAL_CHARACTER_STATE, name: t('creator.defaultName') }));
+  const [subclassName, setSubclassName] = useState('');
+  const [subclassOptions, setSubclassOptions] = useState<FeatItem[]>([]);
+  const [subclassLoadError, setSubclassLoadError] = useState(false);
+  const [subclassLoadAttempt, setSubclassLoadAttempt] = useState(0);
+  const isDruid = (charState.selectedClass?.slug || charState.selectedClass?.name || '').toLowerCase() === 'druid';
+  const selectedSubclass = subclassOptions.find(option => option.name === subclassName) || null;
+  const needsDruidicOrder = isDruid && (!selectedSubclass || !ProgressionChoiceCatalog.isOrder(selectedSubclass));
+  const [heritageOptions, setHeritageOptions] = useState<HeritageItem[]>([]);
+  const [savedSheetDetails, setSavedSheetDetails] = useState(() => ({
+    appearance: CharacterDetails.parseAppearance(null),
+    xp: 0,
+  }));
   const [portrait, setPortrait] = useState<string | undefined>(undefined);
   const [isPortraitPickerOpen, setIsPortraitPickerOpen] = useState(false);
   const savedSnapshot = useRef<string | null>(null);
@@ -193,16 +217,107 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
     }
   }, [charState.background]);
 
+  const PSYCHIC_MIND_ATTRIBUTES: Record<string, AttributeKey> = {
+  'gathered lore': 'int',
+  'precise discipline': 'int',
+  'emotional acceptance': 'cha',
+  'wandering reverie': 'cha',
+};
+
+function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grantedFeatId: string | null } {
+  if (!feat?.system_json) return { skill: null, grantedFeatId: null };
+  try {
+    const sys = JSON.parse(feat.system_json) as { rules?: Array<Record<string, unknown>> };
+    let skill: SkillKey | null = null;
+    let grantedFeatId: string | null = null;
+    for (const rule of sys.rules || []) {
+      if (rule.key === 'ActiveEffectLike' && typeof rule.path === 'string') {
+        const match = /^system\.skills\.([a-z]+)\.rank$/.exec(rule.path);
+        if (match && ALL_SKILLS.includes(match[1] as SkillKey)) {
+          skill = match[1] as SkillKey;
+        }
+      }
+      if (rule.key === 'GrantItem' && typeof rule.uuid === 'string') {
+        const match = /Compendium\.pf2e\.feats-srd\.Item\.([A-Za-z0-9]+)$/.exec(rule.uuid);
+        if (match) grantedFeatId = match[1];
+      }
+    }
+    return { skill, grantedFeatId };
+  } catch {
+    return { skill: null, grantedFeatId: null };
+  }
+}
   // Parse Class Key Abilities
   const parsedClassKeyAbilities = useMemo(() => {
     if (!charState.selectedClass) return [] as AttributeKey[];
-    try {
-      const arr = JSON.parse(charState.selectedClass.key_ability || '[]');
-      return arr as AttributeKey[];
-    } catch (e) {
-      return [] as AttributeKey[];
+    const clsSlug = (charState.selectedClass.slug || charState.selectedClass.name || '').toLowerCase();
+    if (clsSlug === 'psychic' && selectedSubclass) {
+      const mindAttr = PSYCHIC_MIND_ATTRIBUTES[selectedSubclass.name.toLowerCase()];
+      if (mindAttr) return [mindAttr];
     }
-  }, [charState.selectedClass]);
+    try {
+      const arr = JSON.parse(charState.selectedClass.key_ability || '[]') as AttributeKey[];
+      if (arr.length > 0) return arr;
+    } catch { /* ignore */ }
+    if (clsSlug === 'psychic') return ['int', 'cha'] as AttributeKey[];
+    return [] as AttributeKey[];
+  }, [charState.selectedClass, selectedSubclass]);
+
+  useEffect(() => {
+    const cls = charState.selectedClass;
+    if (!cls) {
+      setSubclassOptions([]);
+      return;
+    }
+    const clsSlug = (cls.slug || cls.name || '').toLowerCase();
+    if (clsSlug !== 'druid' && clsSlug !== 'psychic') {
+      setSubclassOptions([]);
+      return;
+    }
+    let cancelled = false;
+    setSubclassOptions([]);
+    setSubclassLoadError(false);
+    fetchFeats({
+      search: '',
+      category: 'classfeature',
+      level: '1',
+      max_level: 'all',
+      action_type: 'all',
+      actions: 'all',
+      rarity: 'all',
+      trait: clsSlug,
+      limit: 200,
+      offset: 0,
+    }).then(res => {
+      if (cancelled) return;
+      const options = clsSlug === 'druid'
+        ? res.feats.filter(ProgressionChoiceCatalog.isOrder)
+        : res.feats.filter(f => f.name.toLowerCase() in PSYCHIC_MIND_ATTRIBUTES);
+      setSubclassOptions(options.sort((a, b) => a.name.localeCompare(b.name)));
+      setSubclassLoadError(options.length === 0);
+    }).catch(() => {
+      if (!cancelled) setSubclassLoadError(true);
+    });
+    return () => { cancelled = true; };
+  }, [charState.selectedClass, subclassLoadAttempt]);
+
+  // Load Heritages when Ancestry changes
+  useEffect(() => {
+    const anc = charState.ancestry;
+    if (!anc) {
+      setHeritageOptions([]);
+      return;
+    }
+    let cancelled = false;
+    fetchHeritages(anc.slug || anc.name.toLowerCase())
+      .then((rows) => {
+        if (!cancelled) setHeritageOptions(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setHeritageOptions([]);
+      });
+    return () => { cancelled = true; };
+  }, [charState.ancestry]);
 
   // Handle Ancestry Selection
   const handleSelectAncestry = (ancestry: AncestryItem) => {
@@ -220,6 +335,7 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
     setCharState(prev => ({
       ...prev,
       ancestry,
+      heritage: null,
       useAlternativeBoosts: false,
       ancestryBoostChoices: defaultBoostChoices,
       useVoluntaryFlaw: false,
@@ -252,7 +368,11 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
       const arr = JSON.parse(cls.key_ability || '[]');
       if (arr.length > 0) initialKey = arr[0];
     } catch (e) {}
+    if (!initialKey && (cls.slug || cls.name || '').toLowerCase() === 'psychic') {
+      initialKey = 'int';
+    }
 
+    setSubclassName('');
     setCharState(prev => ({
       ...prev,
       selectedClass: cls,
@@ -397,10 +517,20 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
     };
   }, [charState, calculatedAttributes]);
 
-  const skillBudget = useMemo(
-    () => computeInitialSkillBudget(charState.background, charState.selectedClass, calculatedAttributes.int.mod),
-    [charState.background, charState.selectedClass, calculatedAttributes.int.mod]
-  );
+  const subclassEffects = useMemo(() => parseOrderRules(selectedSubclass), [selectedSubclass]);
+
+  const skillBudget = useMemo(() => {
+    const base = computeInitialSkillBudget(charState.background, charState.selectedClass, calculatedAttributes.int.mod);
+    const skilledBonus = hasSkilledHumanSkill(charState.heritage) ? 1 : 0;
+    const autoTrained = subclassEffects.skill && !base.autoTrained.includes(subclassEffects.skill)
+      ? [...base.autoTrained, subclassEffects.skill]
+      : base.autoTrained;
+    return {
+      ...base,
+      autoTrained,
+      freeBudget: base.freeBudget + skilledBonus,
+    };
+  }, [charState.background, charState.selectedClass, charState.heritage, calculatedAttributes.int.mod, subclassEffects.skill]);
 
   const effectiveSelectedSkills = useMemo(() => {
     const autoSet = new Set(skillBudget.autoTrained);
@@ -413,6 +543,34 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
     [skillBudget.autoTrained, effectiveSelectedSkills]
   );
 
+  const pendingChoices: { step: number; message: string }[] = [];
+  const missingAncestryBoost = charState.ancestry && (charState.useAlternativeBoosts
+    ? !charState.ancestryBoostChoices.alt0 || !charState.ancestryBoostChoices.alt1
+    : parsedAncestryBoosts.some(boost => boost.options.length > 1 && !charState.ancestryBoostChoices[boost.slotKey]));
+  if (!charState.ancestry) {
+    pendingChoices.push({ step: 1, message: t('creator.pendingAncestry') });
+  }
+  if (missingAncestryBoost || (charState.ancestry && charState.useVoluntaryFlaw &&
+    (!charState.voluntaryFlaw || !charState.voluntaryBoost))) {
+    pendingChoices.push({ step: 1, message: t('creator.pendingAncestryBoosts') });
+  }
+  if (!charState.background) {
+    pendingChoices.push({ step: 2, message: t('creator.pendingBackground') });
+  } else if (!charState.backgroundBoostChoice1 || !charState.backgroundBoostChoice2) {
+    pendingChoices.push({ step: 2, message: t('creator.pendingBackgroundBoosts') });
+  }
+  if (!charState.selectedClass) {
+    pendingChoices.push({ step: 3, message: t('creator.pendingClass') });
+  } else if (!charState.classKeyAttributeChoice) {
+    pendingChoices.push({ step: 3, message: t('creator.pendingClassBoost') });
+  }
+  if (charState.level1FreeBoosts.length < 4) {
+    pendingChoices.push({ step: 4, message: t('creator.pendingFreeBoosts', { selected: charState.level1FreeBoosts.length }) });
+  }
+  if (effectiveSelectedSkills.length < skillBudget.freeBudget) {
+    pendingChoices.push({ step: 5, message: t('creator.pendingSkills', { selected: effectiveSelectedSkills.length, total: skillBudget.freeBudget }) });
+  }
+
   const toggleCreatorSkill = (skill: SkillKey) => {
     if (skillBudget.autoTrained.includes(skill)) return;
     const isSelected = effectiveSelectedSkills.includes(skill);
@@ -424,11 +582,23 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
     setCharState(prev => ({ ...prev, selectedSkills: updated }));
   };
 
-  const creatorSnapshot = () => JSON.stringify({ editingId, charState, portrait });
+  const creatorSnapshot = () => JSON.stringify({ editingId, charState, portrait, subclassName });
   const currentCreatorSnapshot = creatorSnapshot();
+
+  const goToStep = (nextStep: number) => {
+    if (needsDruidicOrder && nextStep > 3) {
+      setCurrentStep(3);
+      return;
+    }
+    setCurrentStep(nextStep);
+  };
 
   // Save Character to SQLite (returns true on success)
   const handleSaveCharacter = async (): Promise<boolean> => {
+    if (needsDruidicOrder) {
+      setCurrentStep(3);
+      return false;
+    }
     setSaving(true);
     setSaveSuccessMsg(null);
     try {
@@ -441,35 +611,44 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
         initLevels[i] = { level: i, attributeBoosts: [], skillIncreases: [], feats: {} };
       }
 
+      if (subclassEffects.grantedFeatId) {
+        const grantedFeat = await fetchFeatById(subclassEffects.grantedFeatId);
+        initLevels[1].feats.order_1 = ProgressionChoiceCatalog.selection(grantedFeat);
+      }
+
       const nextCharState: CharacterABCState = {
         ...charState,
         selectedSkills: effectiveSelectedSkills
       };
 
+      const previous = editingId && loadedCharacter.current?.id === editingId ? JSON.parse(loadedCharacter.current.data_json || '{}') : null;
       const payload = {
         ...(editingId ? { id: editingId } : {}),
         name: charState.name || t('creator.unnamedHero'),
-        level: 1,
+        level: editingId && loadedCharacter.current ? loadedCharacter.current.level : 1,
         ancestry: charState.ancestry?.name || '',
-        heritage: '',
+        heritage: charState.heritage?.name || '',
         background: charState.background?.name || '',
         class: charState.selectedClass?.name || '',
-        subclass: '',
+        subclass: selectedSubclass?.name || '',
         data: {
+          ...previous,
           charState: nextCharState,
           portrait,
-          baseAttributes,
-          calculatedAttributes,
-          derivedStats,
-          progressionLevels: initLevels,
+          ...savedSheetDetails,
+          baseAttributes: previous && !previous.charState?.level1FreeBoosts ? previous.baseAttributes : baseAttributes,
+          calculatedAttributes: previous && !previous.charState?.level1FreeBoosts ? previous.calculatedAttributes : calculatedAttributes,
+          derivedStats: previous && !previous.charState?.level1FreeBoosts ? previous.derivedStats : derivedStats,
+          progressionLevels: previous?.progressionLevels ?? initLevels,
           initialTrainedSkills: allInitialTrainedSkills,
-          loreSkills: deriveDefaultLoreSkills(charState.background, charState.selectedClass),
+          loreSkills: previous?.loreSkills ?? deriveDefaultLoreSkills(charState.background, charState.selectedClass),
         }
       };
 
       const res = await saveCharacter(payload);
       if (res.success) {
-        savedSnapshot.current = JSON.stringify({ editingId: res.id, charState: nextCharState, portrait });
+        savedSnapshot.current = JSON.stringify({ editingId: res.id, charState: nextCharState, portrait, subclassName });
+        loadedCharacter.current = { ...loadedCharacter.current, ...payload, id: res.id, data_json: JSON.stringify(payload.data) } as SavedCharacterRecord;
         setEditingId(res.id);
         setSaveSuccessMsg(t('creator.savedOk'));
         const updatedList = await fetchCharacters();
@@ -492,6 +671,13 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
     }
   };
 
+  const saveAndOpenProgression = async () => {
+    if (await handleSaveCharacter()) {
+      onGuardChange?.(null);
+      onNavigateToLevels?.();
+    }
+  };
+
   // Load a Saved Character
   const handleLoadCharacter = (rec: SavedCharacterRecord) => {
     try {
@@ -499,7 +685,8 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
       if (data.charState) {
         needsBaseline.current = true;
         setEditingId(rec.id);
-        const loadedState: CharacterABCState = data.charState;
+        loadedCharacter.current = rec;
+        const loadedState: CharacterABCState = { ...INITIAL_CHARACTER_STATE, ...data.charState, ancestryBoostChoices: data.charState.ancestryBoostChoices || {}, level1FreeBoosts: data.charState.level1FreeBoosts || [] };
         if (!Array.isArray(loadedState.selectedSkills) && Array.isArray(data.initialTrainedSkills)) {
           const intMod = typeof data.baseAttributes?.int === 'number' ? data.baseAttributes.int : 0;
           const budget = computeInitialSkillBudget(loadedState.background, loadedState.selectedClass, intMod);
@@ -508,7 +695,12 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
           loadedState.selectedSkills = (data.initialTrainedSkills as unknown[])
             .filter((s): s is SkillKey => typeof s === 'string' && validSet.has(s) && !autoSet.has(s));
         }
+        setSubclassName(rec.subclass || '');
         setCharState(loadedState);
+        setSavedSheetDetails({
+          appearance: CharacterDetails.parseAppearance(data.appearance),
+          xp: CharacterDetails.parseXp(data.xp),
+        });
         setPortrait(typeof data.portrait === 'string' && data.portrait.trim() !== '' ? data.portrait : undefined);
         setCurrentStep(6);
       }
@@ -688,14 +880,14 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
           {[
             { num: 1, label: t('creator.step.ancestry'), icon: Sparkles, done: !!charState.ancestry },
             { num: 2, label: t('creator.step.background'), icon: BookOpen, done: !!charState.background },
-            { num: 3, label: t('creator.step.class'), icon: Award, done: !!charState.selectedClass },
+            { num: 3, label: t('creator.step.class'), icon: Award, done: !!charState.selectedClass && !needsDruidicOrder },
             { num: 4, label: t('creator.step.freeBoosts'), icon: CheckCircle2, done: charState.level1FreeBoosts.length === 4 },
             { num: 5, label: t('creator.step.skills'), icon: Award, done: !!charState.selectedClass && effectiveSelectedSkills.length === skillBudget.freeBudget },
-            { num: 6, label: t('creator.step.summary'), icon: Save, done: false }
+            { num: 6, label: t('creator.step.summary'), icon: User, done: false }
           ].map(step => (
             <button
               key={step.num}
-              onClick={() => setCurrentStep(step.num)}
+              onClick={() => goToStep(step.num)}
               className={`flex items-center space-x-2 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
                 currentStep === step.num
                   ? 'bg-accent text-black font-bold shadow-md'
@@ -723,13 +915,27 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
               <span className="hidden sm:inline">{t('common.previous')}</span>
             </button>
           )}
-          {currentStep < 6 && (
+          {currentStep < 6 ? (
             <button
-              onClick={() => setCurrentStep(prev => prev + 1)}
+              onClick={() => goToStep(currentStep + 1)}
               className="flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-hover text-xs font-bold text-black shadow"
             >
               <span className="hidden sm:inline">{t('creator.next')}</span>
               <ChevronRight className="w-4 h-4" />
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                if (needsDruidicOrder) { setCurrentStep(3); return; }
+                if (pendingChoices.length) { setShowPendingChoices(true); return; }
+                void saveAndOpenProgression();
+              }}
+              disabled={saving}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-hover text-xs font-bold text-black shadow disabled:opacity-50 whitespace-nowrap"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>{saving ? t('common.saving') : t('creator.saveAndOpen')}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
@@ -1055,6 +1261,40 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
                   )}
                 </div>
 
+                {/* Heritage Selection */}
+                <div className="bg-elevated border border-border-strong rounded-xl p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                      {t('creator.heritage')}
+                    </h4>
+                    {charState.heritage && isVersatileHeritage(charState.heritage) && (
+                      <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-accent/20 text-accent-text border border-accent/40">
+                        {t('creator.versatileHeritage')}
+                      </span>
+                    )}
+                  </div>
+                  <select
+                    value={charState.heritage?.id || ''}
+                    onChange={(e) => {
+                      const found = heritageOptions.find(h => h.id === e.target.value) || null;
+                      setCharState(prev => ({ ...prev, heritage: found }));
+                    }}
+                    className="w-full bg-canvas border border-border-strong rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-accent"
+                  >
+                    <option value="">{t('creator.selectHeritage')}</option>
+                    {heritageOptions.map(h => (
+                      <option key={h.id} value={h.id}>
+                        {h.name}{isVersatileHeritage(h) ? ` (${t('creator.versatileHeritage')})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {charState.heritage && (
+                    <p className="text-[11px] text-text-secondary leading-relaxed max-h-20 overflow-y-auto">
+                      {cleanSnippetText(charState.heritage.description)}
+                    </p>
+                  )}
+                </div>
+
                 {/* Description Preview */}
                 <div className="text-xs text-text-secondary bg-canvas p-3 rounded-xl border border-border-strong max-h-32 overflow-y-auto leading-relaxed">
                   <p>{cleanSnippetText(charState.ancestry.description)}</p>
@@ -1277,7 +1517,7 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
                     }`}
                   >
                     <img
-                      src={resolvePf2eIcon(cls.img, '/assets/icons/default-icons/class.svg')}
+                      src={resolveClassIcon(cls)}
                       alt={cls.name}
                       className="w-12 h-12 rounded-lg object-contain bg-canvas border border-border-strong p-1 flex-shrink-0"
                     />
@@ -1303,7 +1543,7 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
               <>
                 <div className="flex items-center space-x-3 pb-4 border-b border-border-strong">
                   <img
-                    src={resolvePf2eIcon(charState.selectedClass.img, '/assets/icons/default-icons/class.svg')}
+                    src={resolveClassIcon(charState.selectedClass)}
                     alt={charState.selectedClass.name}
                     className="w-14 h-14 rounded-xl object-contain bg-canvas border border-accent/50 p-1 shadow"
                   />
@@ -1377,15 +1617,55 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
                   </div>
                 </div>
 
+                {/* Subclass Selection (Druidic Order / Psychic Subconscious Mind) */}
+                {(isDruid || subclassOptions.length > 0) && (() => {
+                  const isPsychic = (charState.selectedClass?.slug || charState.selectedClass?.name || '').toLowerCase() === 'psychic';
+                  return (
+                    <div className="bg-elevated border border-border-strong rounded-xl p-3.5 space-y-2.5">
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                        {isPsychic ? t('creator.subconsciousMind') : t('creator.druidicOrder')}
+                      </h4>
+                      <select
+                        value={selectedSubclass?.id || ''}
+                        disabled={subclassOptions.length === 0}
+                        onChange={(e) => {
+                          const found = subclassOptions.find(o => o.id === e.target.value) || null;
+                          setSubclassName(found?.name || '');
+                          if (isPsychic && found) {
+                            const mindAttr = PSYCHIC_MIND_ATTRIBUTES[found.name.toLowerCase()];
+                            if (mindAttr) {
+                              setCharState(prev => ({ ...prev, classKeyAttributeChoice: mindAttr }));
+                            }
+                          }
+                        }}
+                        className="w-full bg-canvas border border-border-strong rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-accent"
+                      >
+                        <option value="">{isPsychic ? t('creator.selectSubconsciousMind') : t('creator.selectDruidicOrder')}</option>
+                        {subclassOptions.map(opt => (
+                          <option key={opt.id} value={opt.id}>
+                            {opt.name}
+                          </option>
+                        ))}
+                      </select>
+                      {isDruid && subclassOptions.length === 0 && (subclassLoadError ? (
+                        <button type="button" className="text-xs text-status-warn underline" onClick={() => setSubclassLoadAttempt(attempt => attempt + 1)}>
+                          {t('sheet.choiceLoadError')}
+                        </button>
+                      ) : <p className="text-xs text-text-secondary">{t('common.loading')}</p>)}
+                    </div>
+                  );
+                })()}
+
                 {/* Description Preview */}
-                <div className="text-xs text-text-secondary bg-canvas p-3 rounded-xl border border-border-strong max-h-36 overflow-y-auto leading-relaxed">
+                <div className="text-sm text-text-secondary bg-canvas p-3 rounded-xl border border-border-strong max-h-48 overflow-y-auto leading-relaxed">
                   <p>{cleanSnippetText(charState.selectedClass.description)}</p>
                 </div>
 
                 <div className="flex justify-end pt-2">
                   <button
-                    onClick={() => setCurrentStep(4)}
-                    className="flex items-center space-x-1.5 px-4 py-2 bg-accent hover:bg-accent-hover text-black font-bold text-xs rounded-xl shadow"
+                    onClick={() => goToStep(4)}
+                    disabled={needsDruidicOrder}
+                    className="flex items-center space-x-1.5 px-4 py-2 bg-accent hover:bg-accent-hover text-black font-bold text-xs rounded-xl shadow disabled:opacity-50"
                   >
                     <span>{t('creator.confirmClass')}</span>
                     <ArrowRight className="w-4 h-4" />
@@ -1658,29 +1938,6 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center space-x-2 flex-wrap gap-y-2">
-                    <button
-                      onClick={handleSaveCharacter}
-                      disabled={saving}
-                      className="flex items-center space-x-2 px-4 py-2.5 bg-control hover:bg-control-hover text-white font-bold text-xs rounded-xl border border-text-muted shadow transition-all disabled:opacity-50"
-                    >
-                      <Save className="w-4 h-4 text-accent-text" />
-                      <span>{saving ? t('common.saving') : t('creator.saveCharacter')}</span>
-                    </button>
-                    {onNavigateToLevels && (
-                      <button
-                        onClick={async () => {
-                          const ok = await handleSaveCharacter();
-                          if (ok) onNavigateToLevels();
-                        }}
-                        disabled={saving}
-                        className="flex items-center space-x-2 px-5 py-2.5 bg-accent hover:bg-accent-hover text-black font-bold text-xs rounded-xl shadow transition-all disabled:opacity-50"
-                      >
-                        <span>{t('creator.saveAndOpen')}</span>
-                        <ArrowRight className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
                 </div>
 
                 {/* Core Stats Row */}
@@ -1932,6 +2189,22 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
           characterAncestry={charState.ancestry?.name}
           onSelect={setPortrait}
           onClose={() => setIsPortraitPickerOpen(false)}
+        />
+      )}
+      {showPendingChoices && (
+        <ConfirmDialog
+          title={t('creator.pendingChoicesTitle')}
+          message={pendingChoices.map(choice => `• ${choice.message}`).join('\n')}
+          cancelLabel={t('creator.reviewChoices')}
+          confirmLabel={t('creator.saveAnyway')}
+          onCancel={() => {
+            setShowPendingChoices(false);
+            if (pendingChoices.length) goToStep(pendingChoices[0].step);
+          }}
+          onConfirm={() => {
+            setShowPendingChoices(false);
+            void saveAndOpenProgression();
+          }}
         />
       )}
       {dialogState && (

@@ -51,6 +51,87 @@ function sqlitePlugin() {
           }
         }
 
+        // HERITAGES ENDPOINT
+        if (pathname === '/api/heritages' && method === 'GET') {
+          try {
+            const ancestrySlug = String(parsedUrl.query.ancestry || '').trim().toLowerCase();
+            const rows = ancestrySlug
+              ? db.prepare(`
+                  SELECT h.*, i.img, i.rarity
+                  FROM heritages h
+                  JOIN items i ON h.id = i.id
+                  WHERE LOWER(COALESCE(h.ancestry_slug, '')) = ? OR h.ancestry_slug IS NULL OR h.ancestry_slug = ''
+                  ORDER BY CASE WHEN LOWER(COALESCE(h.ancestry_slug, '')) = ? THEN 0 ELSE 1 END, h.name ASC
+                `).all(ancestrySlug, ancestrySlug)
+              : db.prepare(`
+                  SELECT h.*, i.img, i.rarity
+                  FROM heritages h
+                  JOIN items i ON h.id = i.id
+                  ORDER BY h.name ASC
+                `).all();
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify(rows));
+            return;
+          } catch (err: any) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: err.message }));
+            return;
+          }
+        }
+
+        // CREATURES (ANIMALS) COMPENDIUM ENDPOINT
+        if (pathname === '/api/creatures' && method === 'GET') {
+          try {
+            const search = String(parsedUrl.query.search || '').trim();
+            const letter = String(parsedUrl.query.letter || '').trim().toLowerCase();
+            const level = String(parsedUrl.query.level || '');
+            const size = String(parsedUrl.query.size || '').trim().toLowerCase();
+            const rarity = String(parsedUrl.query.rarity || '').trim().toLowerCase();
+            const trait = String(parsedUrl.query.trait || '').trim().toLowerCase();
+            const limit = Math.min(200, Math.max(1, parseInt(String(parsedUrl.query.limit || '48'), 10) || 48));
+            const offset = Math.max(0, parseInt(String(parsedUrl.query.offset || '0'), 10) || 0);
+
+            const where: string[] = [];
+            const params: unknown[] = [];
+            if (search) {
+              where.push('(LOWER(name) LIKE ? OR LOWER(traits) LIKE ? OR LOWER(description) LIKE ?)');
+              const term = `%${search.toLowerCase()}%`;
+              params.push(term, term, term);
+            }
+            if (/^[a-z]$/.test(letter)) {
+              where.push('LOWER(name) LIKE ?');
+              params.push(`${letter}%`);
+            }
+            if (level !== '' && level !== 'all') {
+              where.push('level = ?');
+              params.push(parseInt(level, 10));
+            }
+            if (size && size !== 'all') {
+              where.push('LOWER(size) = ?');
+              params.push(size);
+            }
+            if (rarity && rarity !== 'all') {
+              where.push('LOWER(rarity) = ?');
+              params.push(rarity);
+            }
+            if (trait && trait !== 'all') {
+              where.push('LOWER(traits) LIKE ?');
+              params.push(`%"${trait}"%`);
+            }
+
+            const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+            const countRow = db.prepare(`SELECT COUNT(*) as total FROM animals ${whereSql}`).get(...params) as { total?: number } | undefined;
+            const rows = db.prepare(`SELECT * FROM animals ${whereSql} ORDER BY level ASC, name ASC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ total: countRow?.total || 0, creatures: rows }));
+            return;
+          } catch (err: any) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: err.message }));
+            return;
+          }
+        }
+
         // BACKGROUNDS ENDPOINT
         if (pathname === '/api/backgrounds' && method === 'GET') {
           try {

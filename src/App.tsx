@@ -21,8 +21,10 @@ import { SpellbookBuilderView } from './components/SpellbookBuilderView';
 import { CharacterCreatorView } from './components/CharacterCreatorView';
 import { LevelProgressionView, SheetGuard } from './components/LevelProgressionView';
 import { EquipmentExplorerView } from './components/EquipmentExplorerView';
+import { CreatureCompendiumView } from './components/CreatureCompendiumView';
 import { FeatExplorerView } from './components/FeatExplorerView';
-import { SettingsModal, ThemeName } from './components/SettingsModal';
+import { SettingsModal, ThemeName, WallpaperMode } from './components/SettingsModal';
+import { DiceRollerModal } from './components/DiceRollerModal';
 import { HpProgressionMode } from './types/pf2e';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { SplashScreen } from './components/SplashScreen';
@@ -46,13 +48,13 @@ import {
   PanelLeftOpen,
   UserPlus,
   Trash2,
-  Heart,
-  Shield,
   ChevronDown,
   Check,
   FileText,
   Package,
+  PawPrint,
   Settings,
+  Dices,
   Image as ImageIcon
 } from 'lucide-react';
 
@@ -73,9 +75,11 @@ const INITIAL_FILTERS: SpellFilters = {
 export const App: React.FC = () => {
   const { t, locale } = useI18n();
   const [showSettings, setShowSettings] = useState(false);
+  const [showDiceRoller, setShowDiceRoller] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const handleSplashDone = useCallback(() => setShowSplash(false), []);
-  const [activeTab, setActiveTabValue] = useState<'creator' | 'levels' | 'catalog' | 'feats' | 'items' | 'spellbooks'>('levels');
+  const [activeTab, setActiveTabValue] = useState<'creator' | 'levels' | 'catalog' | 'feats' | 'items' | 'creatures' | 'spellbooks'>('levels');
+  const [levelsInitialTab, setLevelsInitialTab] = useState<'combat' | 'progression' | undefined>(undefined);
   const [theme, setTheme] = useState<ThemeName>(() => {
     try { const value = localStorage.getItem('pf2e_theme'); return value === 'light' || value === 'dark' ? value : 'current'; } catch { return 'current'; }
   });
@@ -98,6 +102,27 @@ export const App: React.FC = () => {
   useEffect(() => {
     try { localStorage.setItem('pf2e_hp_mode', hpMode); } catch { /* ignore */ }
   }, [hpMode]);
+  const [wallpaperImage, setWallpaperImage] = useState<string | null>(() => {
+    try {
+      const saved = localStorage.getItem('pf2e_wallpaper_image');
+      if (saved === 'none') return null;
+      return saved || '/assets/wallpaper1.png';
+    } catch {
+      return '/assets/wallpaper1.png';
+    }
+  });
+  useEffect(() => {
+    try {
+      if (wallpaperImage) localStorage.setItem('pf2e_wallpaper_image', wallpaperImage);
+      else localStorage.setItem('pf2e_wallpaper_image', 'none');
+    } catch { /* ignore */ }
+  }, [wallpaperImage]);
+  const [wallpaperMode, setWallpaperMode] = useState<WallpaperMode>(() => {
+    try { return localStorage.getItem('pf2e_wallpaper_mode') === 'tiled' ? 'tiled' : 'scaled'; } catch { return 'scaled'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('pf2e_wallpaper_mode', wallpaperMode); } catch { /* ignore */ }
+  }, [wallpaperMode]);
   const [filters, setFilters] = useState<SpellFilters>(INITIAL_FILTERS);
   const [metadata, setMetadata] = useState<SpellMetadata | null>(null);
   const [spells, setSpells] = useState<SpellItem[]>([]);
@@ -319,26 +344,6 @@ export const App: React.FC = () => {
     }
   }, [activeCharacter, refreshCharacters]);
 
-  // Computed active character stats (PV e CA)
-  const activeCharStats = useMemo(() => {
-    if (!activeCharacter?.data_json) {
-      return { hp: 20, maxHp: 20, ac: 15 };
-    }
-    try {
-      const data = JSON.parse(activeCharacter.data_json);
-      const maxHp = data.hpStats?.totalHp || data.derivedStats?.maxHp || 20;
-      const currentHp = typeof data.session?.currentHp === 'number' ? Math.min(maxHp, Math.max(0, data.session.currentHp)) : maxHp;
-      const ac = data.combatStats?.ac || data.derivedStats?.ac || 15;
-      return {
-        hp: currentHp,
-        maxHp,
-        ac
-      };
-    } catch (e) {
-      return { hp: 20, maxHp: 20, ac: 15 };
-    }
-  }, [activeCharacter]);
-
   // Filtered saved characters for popover search
   const filteredSavedCharacters = useMemo(() => {
     if (!charSearchQuery.trim()) return savedCharacters;
@@ -557,10 +562,16 @@ export const App: React.FC = () => {
               <button onClick={() => { setActiveTab('items'); setIsMobileMenuOpen(false); }} className={`p-2.5 rounded-xl transition-all ${activeTab === 'items' ? 'bg-accent text-black shadow-md' : 'text-text-secondary hover:text-white hover:bg-elevated'}`} title={t('nav.items')} aria-label={t('nav.items')}>
                 <Package className="w-5 h-5" />
               </button>
+              <button onClick={() => { setActiveTab('creatures'); setIsMobileMenuOpen(false); }} className={`p-2.5 rounded-xl transition-all ${activeTab === 'creatures' ? 'bg-accent text-black shadow-md' : 'text-text-secondary hover:text-white hover:bg-elevated'}`} title={t('nav.creatures')} aria-label={t('nav.creatures')}>
+                <PawPrint className="w-5 h-5" />
+              </button>
             </div>
 
-            {/* Bottom: Settings & Database Dot */}
+            {/* Bottom: Dice Roller, Settings & Database Dot */}
             <div className="flex flex-col items-center space-y-1">
+              <button type="button" onClick={() => setShowDiceRoller(true)} className="p-2 rounded-xl text-text-secondary hover:text-white hover:bg-elevated" title={t('dice.title')} aria-label={t('dice.title')}>
+                <Dices className="w-5 h-5" />
+              </button>
               <button type="button" onClick={() => setShowSettings(true)} className="p-2 rounded-xl text-text-secondary hover:text-white hover:bg-elevated" title={t('settings.title')} aria-label={t('settings.open')}>
                 <Settings className="w-5 h-5" />
               </button>
@@ -586,15 +597,6 @@ export const App: React.FC = () => {
                 </div>
               </div>
               <div className="flex items-center space-x-1 flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setShowSettings(true)}
-                  className="p-1.5 rounded-lg text-text-secondary hover:text-white hover:bg-elevated transition-colors"
-                  title={t('settings.title')}
-                  aria-label={t('settings.open')}
-                >
-                  <Settings className="w-4 h-4" />
-                </button>
                 {/* Collapse Sidebar Button */}
                 <button
                   onClick={toggleSidebarCollapse}
@@ -612,47 +614,54 @@ export const App: React.FC = () => {
               </div>
             </div>
 
+            {/* MINI TOOLBAR (ACIMA DE ACTIVE CHARACTER) */}
+            <div className="mx-2.5 mt-2.5 flex items-center gap-1 bg-surface border border-border-strong rounded-xl p-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('creator');
+                  setIsMobileMenuOpen(false);
+                  setIsCharPopoverOpen(false);
+                }}
+                className={`flex-1 flex items-center justify-center py-1.5 rounded-lg transition-colors ${
+                  activeTab === 'creator'
+                    ? 'bg-accent text-black shadow-sm'
+                    : 'text-text-secondary hover:text-accent-text hover:bg-elevated'
+                }`}
+                title={t('app.newBlankHeroWizard')}
+                aria-label={t('app.newBlankHeroWizard')}
+              >
+                <UserPlus className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowDiceRoller(true)}
+                className="flex-1 flex items-center justify-center py-1.5 rounded-lg text-text-secondary hover:text-white hover:bg-elevated transition-colors"
+                title={t('dice.title')}
+                aria-label={t('dice.title')}
+              >
+                <Dices className="w-4 h-4 text-accent-text" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSettings(true)}
+                className="flex-1 flex items-center justify-center py-1.5 rounded-lg text-text-secondary hover:text-white hover:bg-elevated transition-colors"
+                title={t('settings.gameOptions')}
+                aria-label={t('settings.open')}
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+            </div>
+
             {/* CHARACTER SELECTION / CREATION CARD (NO TOPO DAS ABAS) */}
             <div ref={charPopoverRef} className="relative mx-2.5 mt-3">
               <div className="p-3 bg-elevated border border-border-strong rounded-2xl shadow-md space-y-2.5">
-                {/* Header: Label and Action Buttons (Visualizar Ficha, Imprimir, Novo) */}
+                {/* Header: Label */}
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] uppercase font-bold text-text-secondary tracking-wider flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5 text-accent-text" />
                     <span>{t('app.activeCharacter')}</span>
                   </span>
-
-                  <div className="flex items-center space-x-1">
-                    {/* Botão Visualizar Ficha */}
-                    <button
-                      onClick={() => {
-                        setActiveTab('levels');
-                        setIsMobileMenuOpen(false);
-                        setIsCharPopoverOpen(false);
-                      }}
-                      className={`p-1.5 rounded-lg border transition-all shadow-sm ${
-                        activeTab === 'levels'
-                          ? 'bg-accent text-black border-accent'
-                          : 'bg-control hover:bg-control text-text-secondary hover:text-white border-border-strong'
-                      }`}
-                      title={t('app.viewSheet')}
-                    >
-                      <FileText className="w-3.5 h-3.5" />
-                    </button>
-
-                    {/* Botão Novo Herói */}
-                    <button
-                      onClick={() => {
-                        setActiveTab('creator');
-                        setIsMobileMenuOpen(false);
-                        setIsCharPopoverOpen(false);
-                      }}
-                      className="p-1.5 rounded-lg bg-control hover:bg-accent/20 text-text-secondary hover:text-accent-text border border-border-strong hover:border-accent/40 transition-all shadow-sm"
-                      title={t('app.newBlankHeroWizard')}
-                    >
-                      <UserPlus className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
                 </div>
 
                 {/* Unified Clickable Character Card Trigger */}
@@ -665,7 +674,7 @@ export const App: React.FC = () => {
                     className="p-2.5 bg-surface hover:bg-elevated border border-border-strong hover:border-accent/60 rounded-xl cursor-pointer transition-all shadow-inner group"
                     title={t('app.switchCharacter')}
                   >
-                    <div className="flex items-center gap-2.5 mb-2">
+                    <div className="flex items-center gap-2.5">
                       {activePortrait ? (
                         <img
                           src={activePortrait}
@@ -686,28 +695,18 @@ export const App: React.FC = () => {
                           <ChevronDown className={`w-4 h-4 text-text-secondary group-hover:text-accent-text transition-transform duration-200 flex-shrink-0 ${isCharPopoverOpen ? 'rotate-180 text-accent-text' : ''}`} />
                         </div>
 
-                        {/* Secondary: Metadata (Level, Ancestry, Class/Multiclass/Archetype) */}
+                        {/* Secondary: Level + ABC (Ancestry • Background • Class) */}
                         <div className="flex items-center space-x-2 text-[11px] text-text-secondary truncate">
                           <span className="px-1.5 py-0.5 rounded font-black bg-elevated text-accent-text border border-border-strong flex-shrink-0">
                             {t('common.levelShort', { level: activeCharacter.level })}
                           </span>
                           <span className="truncate">
-                            {activeCharacter.ancestry || t('common.ancestry')} • {activeCharacter.class || t('app.classArchetype')}
+                            {[
+                              activeCharacter.ancestry || t('common.ancestry'),
+                              activeCharacter.background || t('common.background'),
+                              activeCharacter.class || t('app.classArchetype'),
+                            ].join(' • ')}
                           </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Combat Mini-Status: PV & CA */}
-                    <div className="pt-2 border-t border-border-subtle">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <div className="flex items-center space-x-1 font-bold text-status-success">
-                          <Heart className="w-3 h-3 text-status-danger fill-red-400/20" />
-                          <span>{activeCharStats.hp}/{activeCharStats.maxHp} {t('common.hp')}</span>
-                        </div>
-                        <div className="flex items-center space-x-1 font-bold text-status-info bg-elevated px-1.5 py-0.5 rounded border border-border-strong">
-                          <Shield className="w-3 h-3 text-status-info" />
-                          <span>{t('common.ac')} {activeCharStats.ac}</span>
                         </div>
                       </div>
                     </div>
@@ -815,21 +814,6 @@ export const App: React.FC = () => {
                       })
                     )}
                   </div>
-
-                  <div className="pt-2 border-t border-border-subtle">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsCharPopoverOpen(false);
-                        setIsMobileMenuOpen(false);
-                        setActiveTab('creator');
-                      }}
-                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-accent hover:bg-accent-hover text-accent-contrast text-xs font-bold shadow"
-                    >
-                      <UserPlus className="w-4 h-4" />
-                      <span>{t('app.newBlankHero')}</span>
-                    </button>
-                  </div>
                 </div>
               )}
             </div>
@@ -913,6 +897,10 @@ export const App: React.FC = () => {
                   <Package className="w-4 h-4 flex-shrink-0" />
                   <span className="block truncate">{t('nav.items')}</span>
                 </button>
+                <button onClick={() => { setActiveTab('creatures'); setIsMobileMenuOpen(false); }} className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-bold transition-all text-left ${activeTab === 'creatures' ? 'bg-accent text-black shadow-md' : 'text-text-secondary hover:text-white hover:bg-elevated'}`}>
+                  <PawPrint className="w-4 h-4 flex-shrink-0" />
+                  <span className="block truncate">{t('nav.creatures')}</span>
+                </button>
               </div>
             </nav>
 
@@ -948,6 +936,12 @@ export const App: React.FC = () => {
       <main
         ref={mainRef}
         onScroll={(e) => setShowScrollTop(e.currentTarget.scrollTop > 300)}
+        style={wallpaperImage ? {
+          backgroundImage: `linear-gradient(rgb(var(--bg-canvas) / 0.72), rgb(var(--bg-canvas) / 0.72)), url("${wallpaperImage}")`,
+          backgroundSize: wallpaperMode === 'tiled' ? 'auto' : 'cover',
+          backgroundRepeat: wallpaperMode === 'tiled' ? 'repeat' : 'no-repeat',
+          backgroundPosition: 'center',
+        } : undefined}
         className="flex-1 h-full overflow-y-auto bg-canvas flex flex-col print:h-auto print:overflow-visible print:bg-white print:text-black"
       >
         <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 flex-1">
@@ -955,7 +949,10 @@ export const App: React.FC = () => {
             /* ABC CHARACTER CREATION WIZARD */
             <CharacterCreatorView
               onGuardChange={onGuardChange}
-              onNavigateToLevels={() => setActiveTab('levels')}
+              onNavigateToLevels={() => {
+                setLevelsInitialTab('progression');
+                setActiveTab('levels');
+              }}
               onCharacterSaved={(savedId) => {
                 setActiveCharId(savedId);
                 refreshCharacters();
@@ -965,6 +962,8 @@ export const App: React.FC = () => {
             /* LEVEL PROGRESSION & ADVANCEMENT (1-20) */
             <LevelProgressionView
               activeCharId={activeCharId}
+              initialSheetTab={levelsInitialTab}
+              onInitialSheetTabConsumed={() => setLevelsInitialTab(undefined)}
               theme={theme}
               onThemeChange={setTheme}
               hpMode={hpMode}
@@ -982,6 +981,8 @@ export const App: React.FC = () => {
               activeCharacterName={activeCharacter?.name}
               onAddToInventory={activeCharacter ? handleAddEquipmentToActiveChar : undefined}
             />
+          ) : activeTab === 'creatures' ? (
+            <CreatureCompendiumView />
           ) : activeTab === 'spellbooks' ? (
             /* SPELLBOOK BUILDER VIEW (66% / 33% SPLIT) */
             <SpellbookBuilderView
@@ -1099,7 +1100,22 @@ export const App: React.FC = () => {
       </div>}
 
       {showSplash && <SplashScreen onDone={handleSplashDone} />}
-      {showSettings && <SettingsModal theme={theme} onThemeChange={setTheme} portraitDb={portraitDb} onPortraitDbChange={setPortraitDb} hpMode={hpMode} onHpModeChange={setHpMode} onClose={() => setShowSettings(false)} />}
+      {showSettings && (
+        <SettingsModal
+          theme={theme}
+          onThemeChange={setTheme}
+          portraitDb={portraitDb}
+          onPortraitDbChange={setPortraitDb}
+          hpMode={hpMode}
+          onHpModeChange={setHpMode}
+          wallpaperImage={wallpaperImage}
+          onWallpaperImageChange={setWallpaperImage}
+          wallpaperMode={wallpaperMode}
+          onWallpaperModeChange={setWallpaperMode}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+      {showDiceRoller && <DiceRollerModal onClose={() => setShowDiceRoller(false)} />}
 
       {confirmDeleteChar && (
         <ConfirmDialog

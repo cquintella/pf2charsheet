@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { AttributeKey, CharacterStrike, InventoryEntry, ClassItem } from '../types/pf2e';
+import { AttributeKey, CharacterStrike, InventoryEntry, ClassItem, ProficiencyRank } from '../types/pf2e';
 import { calculateWeaponStrike } from '../utils/strikeCalculation';
+import { WeaponActions } from './WeaponActions';
 import { ProficiencySelector } from './ProficiencySelector';
 import { getProficiencyBonus } from '../utils/formatters';
 import { Plus, Trash2, Edit3, Check } from 'lucide-react';
@@ -13,6 +14,7 @@ interface Props {
   inventory: InventoryEntry[];
   characterClass: ClassItem | null;
   level: number;
+  athleticsRank: ProficiencyRank;
   strAttackPenalty?: number;
   dexAttackPenalty?: number;
   strDamagePenalty?: number;
@@ -28,6 +30,7 @@ export const StrikesView: React.FC<Props> = ({
   inventory,
   characterClass,
   level,
+  athleticsRank,
   strAttackPenalty = 0,
   dexAttackPenalty = 0,
   strDamagePenalty = 0,
@@ -109,6 +112,17 @@ export const StrikesView: React.FC<Props> = ({
                 </span>
               ))}
             </div>
+          )}
+
+          {!isEditing && (
+            <WeaponActions
+              kind={kind}
+              traits={traitsList}
+              athletics={attributes.str + getProficiencyBonus(athleticsRank, level) + itemBonus + strAttackPenalty}
+              athleticsRank={athleticsRank}
+              weaponRank={strike.proficiency}
+              rangeIncrement={weaponData?.rangeIncrement ?? null}
+            />
           )}
 
           {isEditing && (
