@@ -16,6 +16,8 @@ if (!fs.existsSync(sourceDb)) {
 fs.mkdirSync(outDir, { recursive: true });
 fs.copyFileSync(sourceDb, cleanDb);
 execFileSync(process.execPath, [path.join(rootDir, 'scripts/import-custom-creatures.cjs'), `--db=${cleanDb}`], { stdio: 'inherit' });
+execFileSync(process.execPath, [path.join(rootDir, 'scripts/import-satori.cjs'), `--db=${cleanDb}`], { stdio: 'inherit' });
+execFileSync(process.execPath, [path.join(rootDir, 'scripts/import-psionic-heritages.cjs'), `--db=${cleanDb}`], { stdio: 'inherit' });
 
 const db = new DatabaseSync(cleanDb);
 db.exec('DELETE FROM characters; DELETE FROM spellbooks; VACUUM;');

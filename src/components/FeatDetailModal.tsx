@@ -1,3 +1,4 @@
+import { ActionSymbol } from './ActionSymbol';
 import React, { useRef } from 'react';
 import { FeatItem } from '../types/pf2e';
 import { resolvePf2eIcon, cleanDescriptionHtml } from '../utils/formatters';
@@ -11,6 +12,7 @@ import {
   Layers, 
   BookOpen 
 } from 'lucide-react';
+import { Pencil, Trash2 } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
 import { rarityLabel } from '../i18n/gameTerms';
 
@@ -21,6 +23,9 @@ interface FeatDetailModalProps {
   onClose: () => void;
   onSelectTrait?: (trait: string) => void;
   inline?: boolean;
+  characterLevel?: number;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }
 
 export const FeatDetailModal: React.FC<FeatDetailModalProps> = ({
@@ -29,7 +34,10 @@ export const FeatDetailModal: React.FC<FeatDetailModalProps> = ({
   onToggleFavorite,
   onClose,
   onSelectTrait,
-  inline = false
+  inline = false,
+  characterLevel,
+  onEdit,
+  onDelete
 }) => {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -53,21 +61,21 @@ export const FeatDetailModal: React.FC<FeatDetailModalProps> = ({
       return <span className="pf-action-icon text-sm px-2">⚙ {t('action.passive')}</span>;
     }
     if (feat.action_type === 'reaction') {
-      return <span className="pf-action-icon text-sm px-2 bg-status-danger-bg text-status-danger border-status-danger-border">↺ {t('action.reaction')}</span>;
+      return <span className="pf-action-icon text-sm px-2 bg-status-danger-bg text-status-danger border-status-danger-border"><ActionSymbol kind="reaction" /> {t('action.reaction')}</span>;
     }
     if (feat.action_type === 'free') {
-      return <span className="pf-action-icon text-sm px-2 bg-status-success-bg text-status-success border-status-success-border">◇ {t('action.free')}</span>;
+      return <span className="pf-action-icon text-sm px-2 bg-status-success-bg text-status-success border-status-success-border"><ActionSymbol kind="free" /> {t('action.free')}</span>;
     }
-    if (feat.actions === '1') return <span className="pf-action-icon text-sm px-2">◆ {t('action.1')}</span>;
-    if (feat.actions === '2') return <span className="pf-action-icon text-sm px-2">◆◆ {t('action.2')}</span>;
-    if (feat.actions === '3') return <span className="pf-action-icon text-sm px-2">◆◆◆ {t('action.3')}</span>;
+    if (feat.actions === '1') return <span className="pf-action-icon text-sm px-2"><ActionSymbol kind="one" /> {t('action.1')}</span>;
+    if (feat.actions === '2') return <span className="pf-action-icon text-sm px-2"><ActionSymbol kind="two" /> {t('action.2')}</span>;
+    if (feat.actions === '3') return <span className="pf-action-icon text-sm px-2"><ActionSymbol kind="three" /> {t('action.3')}</span>;
     return <span className="pf-action-icon text-sm px-2">{t('action.generic')}</span>;
   };
 
   const imageSrc = resolvePf2eIcon(feat.img, '/assets/icons/default-icons/feat.svg');
 
   return (
-    <div className={inline ? 'w-full animate-fadeIn' : 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn'} onClick={inline ? undefined : onClose}>
+    <div className={inline ? 'compendium-detail w-full animate-fadeIn' : 'compendium-detail compendium-detail-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn'} onClick={inline ? undefined : onClose}>
       <div
         ref={dialogRef}
         role={inline ? undefined : 'dialog'}
@@ -107,12 +115,14 @@ export const FeatDetailModal: React.FC<FeatDetailModalProps> = ({
                     • {feat.rarity}
                   </span>
                 )}
-                <span>• {feat.source || 'Pathfinder Remaster'}</span>
+                {feat.source && <span>• {feat.source}</span>}
               </div>
             </div>
           </div>
 
           <div className="flex items-center space-x-2">
+            {onEdit && <button type="button" onClick={onEdit} aria-label={t('featEditor.edit')} title={t('featEditor.edit')} className="p-2 rounded-lg border border-border-strong bg-control text-text-primary"><Pencil className="w-5 h-5" /></button>}
+            {onDelete && <button type="button" onClick={onDelete} aria-label={t('featEditor.delete')} title={t('featEditor.delete')} className="p-2 rounded-lg border border-status-danger-border bg-status-danger-bg text-status-danger"><Trash2 className="w-5 h-5" /></button>}
             {onToggleFavorite && (
               <button
                 onClick={onToggleFavorite}
@@ -210,7 +220,7 @@ export const FeatDetailModal: React.FC<FeatDetailModalProps> = ({
             </h3>
             <div
               className="pf-prose max-w-none text-base leading-relaxed text-text-primary space-y-3 bg-canvas p-4 rounded-lg border border-border-strong"
-              dangerouslySetInnerHTML={{ __html: cleanDescriptionHtml(feat.description) }}
+              dangerouslySetInnerHTML={{ __html: cleanDescriptionHtml(feat.description, { actorLevel: characterLevel }) }}
             />
           </div>
         </div>

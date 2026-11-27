@@ -2,7 +2,7 @@ import React from 'react';
 import { SessionState } from '../utils/conditions';
 import { useI18n } from '../i18n/I18nContext';
 import { LevelSquares } from './LevelSquares';
-import { Heart, Shield, Sparkles, Skull, AlertTriangle } from 'lucide-react';
+import { Heart, Shield, Sparkles, Skull, AlertTriangle, Swords } from 'lucide-react';
 
 interface SessionCombatPanelProps {
   session: SessionState;
@@ -18,6 +18,7 @@ const VALUE_CONDITIONS: readonly (keyof Omit<SessionState['conditions'], 'offGua
   'drained',
   'enfeebled',
   'slowed',
+  'stupefied',
 ];
 
 export const SessionCombatPanel: React.FC<SessionCombatPanelProps> = ({ session, maxHp, equippedShield, onChange }) => {
@@ -31,7 +32,7 @@ export const SessionCombatPanel: React.FC<SessionCombatPanelProps> = ({ session,
     <div className="bg-surface border border-border-strong rounded-2xl p-4 shadow-xl space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-border-subtle">
         <h3 className="text-xs font-bold uppercase tracking-wider text-text-secondary flex items-center gap-1.5">
-          <Heart className="w-4 h-4 text-status-danger" />
+          <Swords className="w-4 h-4 text-status-danger" />
           <span>{t('session.title')}</span>
         </h3>
 
@@ -68,7 +69,7 @@ export const SessionCombatPanel: React.FC<SessionCombatPanelProps> = ({ session,
                 >
                   <Heart className="w-12 h-12 fill-status-danger-bg stroke-status-danger-border stroke-[1.75]" />
                   <div className="absolute inset-0 flex flex-col items-center justify-center leading-none -mt-0.5">
-                    <span className="text-[11px] font-black text-text-primary tabular-nums">{currentHp + session.tempHp}</span>
+                    <span className="text-xs font-black text-text-primary tabular-nums">{currentHp + session.tempHp}</span>
                   </div>
                 </div>
                 <label className="text-xs font-bold uppercase text-text-muted flex items-center gap-1.5">
@@ -114,35 +115,35 @@ export const SessionCombatPanel: React.FC<SessionCombatPanelProps> = ({ session,
           </div>
 
           {/* Cápsula: Hero Points & Focus Points (embaixo de Hit Points) */}
-          <div className="bg-inset border border-border-subtle rounded-xl p-3 grid grid-cols-2 gap-2.5">
-            <div className="bg-surface border border-border-subtle rounded-xl p-2.5 flex flex-col justify-between space-y-1.5">
-              <span className="text-[11px] font-bold uppercase text-text-muted flex items-center gap-1">
+          <div className="bg-inset border border-border-subtle rounded-xl p-3 grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2.5">
+            <div className="bg-surface border border-border-subtle rounded-xl p-2.5 space-y-1">
+              <span className="text-xs font-bold uppercase text-text-muted flex items-center gap-1">
                 <Sparkles className="w-3.5 h-3.5 text-accent-text" />
                 {t('session.heroPoints')}
               </span>
-              <div className="flex items-center justify-between">
-                <button type="button" onClick={() => onChange({ ...session, heroPoints: Math.max(0, session.heroPoints - 1) })} className="px-2.5 py-1 rounded bg-elevated text-text-primary text-xs font-bold">-</button>
-                <span className="font-black text-base text-accent-text tabular-nums">{session.heroPoints}</span>
-                <button type="button" onClick={() => onChange({ ...session, heroPoints: Math.min(3, session.heroPoints + 1) })} className="px-2.5 py-1 rounded bg-elevated text-text-primary text-xs font-bold">+</button>
-              </div>
+              <LevelSquares
+                label={t('session.heroPoints')}
+                value={session.heroPoints}
+                max={3}
+                onChange={value => onChange({ ...session, heroPoints: value })}
+              />
             </div>
 
-            <div className="bg-surface border border-border-subtle rounded-xl p-2.5 flex flex-col justify-between space-y-1.5">
-              <span className="text-[11px] font-bold uppercase text-text-muted block truncate">{t('session.focusPoints')}</span>
-              <div className="flex items-center justify-between">
-                <button type="button" onClick={() => onChange({ ...session, focusPoints: Math.max(0, session.focusPoints - 1) })} className="px-2.5 py-1 rounded bg-elevated text-text-primary text-xs font-bold">-</button>
-                <span className="font-black text-base text-status-info tabular-nums">{session.focusPoints}</span>
-                <button type="button" onClick={() => onChange({ ...session, focusPoints: Math.min(3, session.focusPoints + 1) })} className="px-2.5 py-1 rounded bg-elevated text-text-primary text-xs font-bold">+</button>
-              </div>
+            <div className="bg-surface border border-border-subtle rounded-xl p-2.5 space-y-1">
+              <span className="text-xs font-bold uppercase text-text-muted block truncate">{t('session.focusPoints')}</span>
+              <LevelSquares
+                label={t('session.focusPoints')}
+                value={session.focusPoints}
+                max={Math.min(3, Math.max(1, session.maxFocusPoints || 3)) as 1 | 2 | 3}
+                onChange={value => onChange({ ...session, focusPoints: value })}
+              />
             </div>
           </div>
-        </div>
 
-        {/* Coluna Direita: Cápsula Dying & Wounded + Conditions */}
-        <div className="lg:col-span-6 bg-inset border border-border-subtle rounded-xl p-3 space-y-3">
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2.5">
+          {/* Cápsula: Dying & Wounded (embaixo de Hero Points e Focus Points) */}
+          <div className="bg-inset border border-border-subtle rounded-xl p-3 grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2.5">
             <div className="bg-surface border border-border-subtle rounded-xl p-2.5 space-y-1">
-              <span className="text-[11px] font-bold uppercase text-text-muted flex items-center gap-1">
+              <span className="text-xs font-bold uppercase text-text-muted flex items-center gap-1">
                 <Skull className="w-3.5 h-3.5 text-status-danger" />
                 {t('session.dying')}
               </span>
@@ -155,7 +156,7 @@ export const SessionCombatPanel: React.FC<SessionCombatPanelProps> = ({ session,
             </div>
 
             <div className="bg-surface border border-border-subtle rounded-xl p-2.5 space-y-1">
-              <span className="text-[11px] font-bold uppercase text-text-muted flex items-center gap-1">
+              <span className="text-xs font-bold uppercase text-text-muted flex items-center gap-1">
                 <AlertTriangle className="w-3.5 h-3.5 text-status-warn" />
                 {t('session.wounded')}
               </span>
@@ -167,11 +168,14 @@ export const SessionCombatPanel: React.FC<SessionCombatPanelProps> = ({ session,
               />
             </div>
           </div>
+        </div>
 
-          <div className="pt-2.5 border-t border-border-subtle space-y-2">
+        {/* Coluna Direita: Conditions */}
+        <div className="lg:col-span-6 bg-inset border border-border-subtle rounded-xl p-3 space-y-2">
+          <div className="space-y-2">
             <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-              <span className="text-[11px] font-bold uppercase text-text-muted">{t('session.conditions')}</span>
-              <span className="text-[11px] text-text-muted">{t('session.clearLevelHint')}</span>
+              <span className="text-xs font-bold uppercase text-text-muted">{t('session.conditions')}</span>
+              <span className="text-xs text-text-muted">{t('session.clearLevelHint')}</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button

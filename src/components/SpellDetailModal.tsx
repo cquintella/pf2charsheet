@@ -1,3 +1,4 @@
+import { ActionSymbol } from './ActionSymbol';
 import React, { useEffect, useState, useRef } from 'react';
 import { SpellItem } from '../types/pf2e';
 import { updateSpellIcon } from '../services/api';
@@ -8,7 +9,7 @@ import { rarityLabel } from '../i18n/gameTerms';
 import { cleanDescriptionHtml } from '../utils/formatters';
 import { buildSpellFormulaContext } from '../utils/foundryFormula';
 import { useModalFocus } from '../utils/useModalFocus';
-import { X, Shield, Clock, Crosshair, Hourglass, BookOpen, Layers, Star, Camera, Scroll } from 'lucide-react';
+import { X, Shield, Clock, Crosshair, Hourglass, BookOpen, Layers, Star, Camera, Scroll, Pencil, Trash2 } from 'lucide-react';
 
 interface SpellDetailModalProps {
   spell: SpellItem | null;
@@ -19,6 +20,8 @@ interface SpellDetailModalProps {
   onSelectTrait?: (trait: string) => void;
   inline?: boolean;
   characterLevel?: number;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }
 
 export const SpellDetailModal: React.FC<SpellDetailModalProps> = ({ 
@@ -29,7 +32,9 @@ export const SpellDetailModal: React.FC<SpellDetailModalProps> = ({
   onClose, 
   onSelectTrait,
   inline = false,
-  characterLevel
+  characterLevel,
+  onEdit,
+  onDelete
 }) => {
   const { t } = useI18n();
   const [showIconPicker, setShowIconPicker] = useState<boolean>(false);
@@ -68,11 +73,11 @@ export const SpellDetailModal: React.FC<SpellDetailModalProps> = ({
 
   // Format action icon
   const renderActionCost = (time: string) => {
-    if (time === '1') return <span className="pf-action-icon text-sm px-2">◆ {t('action.1')}</span>;
-    if (time === '2') return <span className="pf-action-icon text-sm px-2">◆◆ {t('action.2')}</span>;
-    if (time === '3') return <span className="pf-action-icon text-sm px-2">◆◆◆ {t('action.3')}</span>;
-    if (time === 'reaction') return <span className="pf-action-icon text-sm px-2 bg-status-danger-bg text-status-danger border-status-danger-border">↺ {t('action.reaction')}</span>;
-    if (time === 'free') return <span className="pf-action-icon text-sm px-2 bg-status-success-bg text-status-success border-status-success-border">◇ {t('action.free')}</span>;
+    if (time === '1') return <span className="pf-action-icon text-sm px-2"><ActionSymbol kind="one" /> {t('action.1')}</span>;
+    if (time === '2') return <span className="pf-action-icon text-sm px-2"><ActionSymbol kind="two" /> {t('action.2')}</span>;
+    if (time === '3') return <span className="pf-action-icon text-sm px-2"><ActionSymbol kind="three" /> {t('action.3')}</span>;
+    if (time === 'reaction') return <span className="pf-action-icon text-sm px-2 bg-status-danger-bg text-status-danger border-status-danger-border"><ActionSymbol kind="reaction" /> {t('action.reaction')}</span>;
+    if (time === 'free') return <span className="pf-action-icon text-sm px-2 bg-status-success-bg text-status-success border-status-success-border"><ActionSymbol kind="free" /> {t('action.free')}</span>;
     return <span className="pf-action-icon text-sm px-2">{time || t('action.1')}</span>;
   };
 
@@ -95,7 +100,7 @@ export const SpellDetailModal: React.FC<SpellDetailModalProps> = ({
 
   return (
     <>
-      <div className={inline ? 'w-full animate-fadeIn' : 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn'} onClick={inline ? undefined : onClose}>
+      <div className={inline ? 'compendium-detail w-full animate-fadeIn' : 'compendium-detail compendium-detail-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn'} onClick={inline ? undefined : onClose}>
         <div
           ref={dialogRef}
           role={inline ? undefined : 'dialog'}
@@ -123,7 +128,7 @@ export const SpellDetailModal: React.FC<SpellDetailModalProps> = ({
                 />
                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity text-white">
                   <Camera className="w-5 h-5 text-accent-text" />
-                  <span className="text-[11px] font-bold text-center uppercase tracking-tighter mt-0.5">
+                  <span className="text-xs font-bold text-center uppercase tracking-tighter mt-0.5">
                     {t('common.change')}
                   </span>
                 </div>
@@ -152,6 +157,8 @@ export const SpellDetailModal: React.FC<SpellDetailModalProps> = ({
             </div>
 
             <div className="flex items-center space-x-2">
+              {onEdit && <button type="button" onClick={onEdit} aria-label={t('catalogEditor.editSpell')} title={t('catalogEditor.editSpell')} className="p-2 rounded-lg border border-border-strong bg-control text-text-primary"><Pencil className="w-5 h-5" /></button>}
+              {onDelete && <button type="button" onClick={onDelete} aria-label={t('catalogEditor.deleteSpell')} title={t('catalogEditor.deleteSpell')} className="p-2 rounded-lg border border-status-danger-border bg-status-danger-bg text-status-danger"><Trash2 className="w-5 h-5" /></button>}
               {onToggleFavorite && (
                 <button
                   onClick={onToggleFavorite}

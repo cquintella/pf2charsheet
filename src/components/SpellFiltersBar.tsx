@@ -61,6 +61,7 @@ export const SpellFiltersBar: React.FC<SpellFiltersBarProps> = ({
             type="text"
             value={filters.search}
             onChange={(e) => onChange({ search: e.target.value, offset: 0 })}
+            data-shortcut-search
             placeholder={t('spellFilters.searchPlaceholder')}
             className="w-full pl-10 pr-10 py-2.5 bg-elevated border border-border-strong focus:border-accent rounded-lg text-sm text-white placeholder-text-muted outline-none transition-colors"
           />
@@ -160,7 +161,7 @@ export const SpellFiltersBar: React.FC<SpellFiltersBarProps> = ({
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 pt-2 border-t border-border-strong">
         {/* Category */}
         <div>
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary block mb-1">
+          <label className="text-xs font-semibold uppercase tracking-wider text-text-secondary block mb-1">
             {t('spellFilters.type')}
           </label>
           <select
@@ -178,7 +179,7 @@ export const SpellFiltersBar: React.FC<SpellFiltersBarProps> = ({
 
         {/* Action Cost */}
         <div>
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary block mb-1">
+          <label className="text-xs font-semibold uppercase tracking-wider text-text-secondary block mb-1">
             {t('spell.cast')}
           </label>
           <select
@@ -197,7 +198,7 @@ export const SpellFiltersBar: React.FC<SpellFiltersBarProps> = ({
 
         {/* Defense / Save */}
         <div>
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary block mb-1">
+          <label className="text-xs font-semibold uppercase tracking-wider text-text-secondary block mb-1">
             {t('spellFilters.save')}
           </label>
           <select
@@ -215,7 +216,7 @@ export const SpellFiltersBar: React.FC<SpellFiltersBarProps> = ({
 
         {/* Traits Filter */}
         <div>
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary block mb-1">
+          <label className="text-xs font-semibold uppercase tracking-wider text-text-secondary block mb-1">
             {t('filters.trait')}
           </label>
           <select
@@ -234,7 +235,7 @@ export const SpellFiltersBar: React.FC<SpellFiltersBarProps> = ({
 
         {/* Rarity */}
         <div>
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary block mb-1">
+          <label className="text-xs font-semibold uppercase tracking-wider text-text-secondary block mb-1">
             {t('filters.rarity')}
           </label>
           <select

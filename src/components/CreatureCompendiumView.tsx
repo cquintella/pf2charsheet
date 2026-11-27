@@ -33,8 +33,10 @@ function parseTraits(raw: string): string[] {
 }
 
 /** Explorer for the PF2e creatures/animals table with filtering and detail view. */
-export const CreatureCompendiumView: React.FC = () => {
+export const CreatureCompendiumView: React.FC<{ activeCharacterName?: string; onAddCompanion?: (creature: CreatureItem) => Promise<void> }> = ({ activeCharacterName, onAddCompanion }) => {
   const { t } = useI18n();
+  const [addingCompanion, setAddingCompanion] = useState(false);
+  const [companionStatus, setCompanionStatus] = useState<'success' | 'error' | null>(null);
   const [search, setSearch] = useState('');
   const [letter, setLetter] = useState('all');
   const [level, setLevel] = useState('all');
@@ -124,6 +126,7 @@ export const CreatureCompendiumView: React.FC = () => {
             type="text"
             value={search}
             onChange={(e) => { setSearch(e.target.value); setOffset(0); }}
+            data-shortcut-search
             placeholder={t('creatures.searchPlaceholder')}
             className={`${controlClass} w-full pl-9`}
           />
@@ -211,11 +214,11 @@ export const CreatureCompendiumView: React.FC = () => {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div className="compendium-cards compendium-cards-creatures">
             {creatures.map((creature) => (
               <div
                 key={creature.id}
-                {...clickableProps(() => setSelected(creature))}
+                {...clickableProps(() => { setCompanionStatus(null); setSelected(creature); })}
                 className="h-[430px] bg-surface hover:bg-elevated border border-border-strong hover:border-accent/60 rounded-2xl p-4 cursor-pointer transition-all shadow-md flex flex-col gap-2.5 group overflow-hidden"
               >
                 {/* Row 1: Name + Challenge Rate (Level) */}
@@ -239,7 +242,7 @@ export const CreatureCompendiumView: React.FC = () => {
                 </div>
 
                 {/* Row 3: Stats */}
-                <div className="grid grid-cols-4 gap-1.5 text-center text-[11px] shrink-0">
+                <div className="grid grid-cols-4 gap-1.5 text-center text-xs shrink-0">
                   <div className="bg-inset rounded-lg py-1.5 px-1 border border-border-subtle">
                     <span className="text-text-muted block">{t('common.hp')}</span>
                     <span className="font-black text-white">{creature.hp}</span>
@@ -288,7 +291,7 @@ export const CreatureCompendiumView: React.FC = () => {
       {/* Detail Modal */}
       {selected && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+          className="compendium-detail compendium-detail-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
           onClick={() => setSelected(null)}
         >
           <div
@@ -330,6 +333,17 @@ export const CreatureCompendiumView: React.FC = () => {
               {parseTraits(selected.traits).map((tr) => (
                 <span key={tr} className="pf-trait">{tr}</span>
               ))}
+            </div>
+            <div className="space-y-2">
+              <button type="button" disabled={!onAddCompanion || addingCompanion} onClick={async () => {
+                if (!onAddCompanion) return;
+                setAddingCompanion(true); setCompanionStatus(null);
+                try { await onAddCompanion(selected); setCompanionStatus('success'); } catch { setCompanionStatus('error'); } finally { setAddingCompanion(false); }
+              }} className="px-3 py-2 rounded-lg bg-accent text-accent-contrast font-semibold disabled:opacity-50">
+                {addingCompanion ? t('common.saving') : t('creatures.addCompanion')}
+              </button>
+              <p className="text-text-secondary text-sm">{onAddCompanion ? t('creatures.companionHint', { name: activeCharacterName || '' }) : t('creatures.companionNoCharacter')}</p>
+              {companionStatus && <p role="status" className={companionStatus === 'success' ? 'text-status-success' : 'text-status-danger'}>{t(companionStatus === 'success' ? 'creatures.companionAdded' : 'creatures.companionError')}</p>}
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
@@ -380,7 +394,7 @@ export const CreatureCompendiumView: React.FC = () => {
             )}
 
             <div className="flex items-center justify-between pt-2 border-t border-border-strong">
-              <span className="text-[11px] text-text-muted">{selected.source || ''}</span>
+              <span className="text-xs text-text-muted">{selected.source || ''}</span>
             </div>
           </div>
         </div>

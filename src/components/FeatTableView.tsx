@@ -1,3 +1,4 @@
+import { ActionSymbol } from './ActionSymbol';
 import React, { useState, useMemo } from 'react';
 import { FeatItem } from '../types/pf2e';
 import { resolvePf2eIcon } from '../utils/formatters';
@@ -73,18 +74,18 @@ export const FeatTableView: React.FC<FeatTableViewProps> = ({
 
   const renderActionBadge = (feat: FeatItem) => {
     if (feat.action_type === 'passive') {
-      return <span className="text-[11px] text-text-secondary">{t('action.passive')}</span>;
+      return <span className="text-xs text-text-secondary">{t('action.passive')}</span>;
     }
     if (feat.action_type === 'reaction') {
-      return <span className="pf-action-icon text-[11px] px-1.5 bg-status-danger-bg text-status-danger border-status-danger-border">↺ {t('action.reaction')}</span>;
+      return <span className="pf-action-icon text-xs px-1.5 bg-status-danger-bg text-status-danger border-status-danger-border"><ActionSymbol kind="reaction" /> {t('action.reaction')}</span>;
     }
     if (feat.action_type === 'free') {
-      return <span className="pf-action-icon text-[11px] px-1.5 bg-status-success-bg text-status-success border-status-success-border">◇ {t('action.freeShort')}</span>;
+      return <span className="pf-action-icon text-xs px-1.5 bg-status-success-bg text-status-success border-status-success-border"><ActionSymbol kind="free" /> {t('action.freeShort')}</span>;
     }
-    if (feat.actions === '1') return <span className="pf-action-icon text-[11px] px-1.5">◆ 1</span>;
-    if (feat.actions === '2') return <span className="pf-action-icon text-[11px] px-1.5">◆◆ 2</span>;
-    if (feat.actions === '3') return <span className="pf-action-icon text-[11px] px-1.5">◆◆◆ 3</span>;
-    return <span className="text-[11px] text-text-secondary">{t('action.generic')}</span>;
+    if (feat.actions === '1') return <span className="pf-action-icon text-xs px-1.5"><ActionSymbol kind="one" /> 1</span>;
+    if (feat.actions === '2') return <span className="pf-action-icon text-xs px-1.5"><ActionSymbol kind="two" /> 2</span>;
+    if (feat.actions === '3') return <span className="pf-action-icon text-xs px-1.5"><ActionSymbol kind="three" /> 3</span>;
+    return <span className="text-xs text-text-secondary">{t('action.generic')}</span>;
   };
 
   const renderSortHeader = (field: FeatSortField, label: React.ReactNode, className: string = '') => {
@@ -116,7 +117,7 @@ export const FeatTableView: React.FC<FeatTableViewProps> = ({
   return (
     <div className="w-full overflow-x-auto rounded-xl border border-border-strong bg-surface shadow">
       <table className="w-full text-left text-xs text-text-primary">
-        <thead className="bg-elevated text-text-secondary uppercase text-[11px] tracking-wider border-b border-border-strong">
+        <thead className="bg-elevated text-text-secondary uppercase text-xs tracking-wider border-b border-border-strong">
           <tr>
             {renderSortHeader('favorite', '⭐', 'w-12 text-center')}
             {renderSortHeader('level', t('common.levelLabel'), 'w-16 text-center')}
@@ -202,7 +203,7 @@ export const FeatTableView: React.FC<FeatTableViewProps> = ({
 
                 {/* Category */}
                 <td className="py-3 px-4">
-                  <span className="text-[11px] font-bold uppercase px-2 py-0.5 rounded bg-elevated text-status-info border border-border-strong">
+                  <span className="text-xs font-bold uppercase px-2 py-0.5 rounded bg-elevated text-status-info border border-border-strong">
                     {feat.category}
                   </span>
                 </td>
@@ -215,7 +216,7 @@ export const FeatTableView: React.FC<FeatTableViewProps> = ({
                 {/* Prerequisites */}
                 <td className="py-3 px-4 text-text-secondary">
                   {prereqs.length > 0 ? (
-                    <span className="truncate block max-w-[180px] text-[11px]" title={prereqs.join('; ')}>
+                    <span className="truncate block max-w-[180px] text-xs" title={prereqs.join('; ')}>
                       {prereqs.join('; ')}
                     </span>
                   ) : (
@@ -225,7 +226,7 @@ export const FeatTableView: React.FC<FeatTableViewProps> = ({
 
                 {/* Rarity */}
                 <td className="py-3 px-4">
-                  <span className={`text-[11px] font-semibold uppercase px-1.5 py-0.5 rounded ${
+                  <span className={`text-xs font-semibold uppercase px-1.5 py-0.5 rounded ${
                     feat.rarity === 'uncommon' ? 'bg-status-warn-bg text-status-warn' :
                     feat.rarity === 'rare' ? 'bg-status-info-bg text-status-info' :
                     feat.rarity === 'unique' ? 'bg-status-purple-bg text-status-purple' :
@@ -247,13 +248,13 @@ export const FeatTableView: React.FC<FeatTableViewProps> = ({
                             onSelectTrait(t);
                           }
                         }}
-                        className="text-[11px] uppercase px-1.5 py-0.5 rounded bg-elevated text-status-info border border-border-strong hover:bg-control"
+                        className="text-xs uppercase px-1.5 py-0.5 rounded bg-elevated text-status-info border border-border-strong hover:bg-control"
                       >
                         {t}
                       </span>
                     ))}
                     {traits.length > 4 && (
-                      <span className="text-[11px] text-text-muted">
+                      <span className="text-xs text-text-muted">
                         +{traits.length - 4}
                       </span>
                     )}

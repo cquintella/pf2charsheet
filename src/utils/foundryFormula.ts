@@ -152,7 +152,7 @@ function readBracketContent(text: string, openIdx: number): { content: string; e
 
 function formatDamageBody(body: string, ctx: FormulaContext): string {
   // Split optional trailing [damage,types]
-  let exprPart = body.trim();
+  let exprPart = body.split('|')[0].trim();
   let typesPart = '';
   const trailingTypes = exprPart.match(/\[([^\[\]]+)\]$/);
   if (trailingTypes) {
@@ -166,7 +166,8 @@ function formatDamageBody(body: string, ctx: FormulaContext): string {
     const countRaw = diceMatch[1].trim();
     const rest = diceMatch[2].trim();
     const evaluatedCount = evaluateFormulaExpression(countRaw, ctx);
-    const resolvedExpr = evaluatedCount !== null ? `${evaluatedCount}${rest}` : `${countRaw}${rest}`;
+    const resolvedCount = evaluatedCount !== null ? String(evaluatedCount) : countRaw.replace(/@actor\.level\b/g, 'character level').replace(/@item\.rank\b/g, 'item rank').replace(/@item\.level\b/g, 'item level');
+    const resolvedExpr = `${resolvedCount}${rest}`;
     return typesPart ? `${resolvedExpr} ${typesPart}` : resolvedExpr;
   }
 

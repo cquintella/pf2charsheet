@@ -7,6 +7,7 @@ export interface RuleContext {
   feats: FeatSelectionRecord[];
   orderNames?: string[];
   incompleteOrders?: boolean;
+  heritageName?: string;
 }
 /** `unreadable` marks entries whose text could not be parsed; the UI shows a localized label instead of `text`. */
 export interface RequirementResult { text: string; status: 'met' | 'unmet' | 'unknown'; unreadable?: boolean }
@@ -30,6 +31,9 @@ export function evaluatePrerequisites(raw: string, context: RuleContext): Requir
       if (key) return { text, status: context.skills[key] >= rank ? 'met' : 'unmet' };
     }
     const normalized = text.trim().toLowerCase();
+    if (context.heritageName !== undefined && ['crystal elf heritage', 'psi-forged heritage'].includes(normalized)) {
+      return { text, status: normalized === `${context.heritageName.trim().toLowerCase()} heritage` ? 'met' : 'unmet' };
+    }
     if (context.feats.some(feat => feat.featName.toLowerCase() === normalized)) return { text, status: 'met' };
     if (context.orderNames && /\border\b/.test(normalized)) {
       const alternatives = normalized.split(/\s+or\s+/);
@@ -55,16 +59,60 @@ export function evaluatePrerequisites(raw: string, context: RuleContext): Requir
   });
 }
 
-// Apply only unconditional, numeric minimum skill ranks. Other Foundry rules need dedicated handlers.
-export function applyFeatSkillEffects(feat: FeatSelectionRecord, ranks: Record<SkillKey, ProficiencyRank>): void {
-  if (!feat.system_json) return;
+function evalLevelFormula(raw: unknown, actorLevel: number): number | null {
+  if (typeof raw === 'number' && Number.isInteger(raw)) return raw;
+  if (typeof raw !== 'string') return null;
+  const text = raw.trim();
+  if (/^\d+$/.test(text)) return Number(text);
+  const match = /^ternary\(\s*gte\(\s*@actor\.level\s*,\s*(\d+)\s*\)\s*,\s*([^,]+)\s*,\s*(.+)\s*\)$/.exec(text);
+  if (!match) return null;
+  const threshold = Number(match[1]);
+  return evalLevelFormula(actorLevel >= threshold ? match[2] : match[3], actorLevel);
+}
+
+// Extract unconditional, numeric (or level-ternary) minimum skill rank upgrades from a feat or feature.
+export function extractFeatSkillGrants(feat: FeatSelectionRecord, actorLevel = 1): { skill: SkillKey; rank: ProficiencyRank }[] {
+  if (!feat.system_json) return [];
   let system: unknown;
-  try { system = JSON.parse(feat.system_json); } catch { return; }
-  if (!system || typeof system !== 'object' || !('rules' in system) || !Array.isArray(system.rules)) return;
+  try { system = JSON.parse(feat.system_json); } catch { return []; }
+  if (!system || typeof system !== 'object' || !('rules' in system) || !Array.isArray(system.rules)) return [];
+  const result: { skill: SkillKey; rank: ProficiencyRank }[] = [];
   for (const rule of system.rules) {
-    if (!rule || typeof rule !== 'object' || rule.key !== 'ActiveEffectLike' || rule.mode !== 'upgrade' || rule.predicate !== undefined || typeof rule.path !== 'string' || !Number.isInteger(rule.value) || rule.value < 1 || rule.value > 4) continue;
+    if (!rule || typeof rule !== 'object' || rule.key !== 'ActiveEffectLike' || rule.mode !== 'upgrade' || rule.predicate !== undefined || typeof rule.path !== 'string') continue;
+    const rank = evalLevelFormula(rule.value, actorLevel);
+    if (rank === null || rank < 1 || rank > 4) continue;
     const match = /^system\.skills\.([a-z]+)\.rank$/.exec(rule.path);
     const skill = match && ALL_SKILLS.find(s => s === match[1]);
-    if (skill) ranks[skill] = Math.max(ranks[skill], rule.value) as ProficiencyRank;
+    if (skill) result.push({ skill, rank: rank as ProficiencyRank });
+  }
+  return result;
+}
+
+function upgradeTrainedOrExpert(ranks: Record<SkillKey, ProficiencyRank>, skill: SkillKey): void {
+  const target = ranks[skill] >= 1 ? 2 : 1;
+  ranks[skill] = Math.max(ranks[skill], target) as ProficiencyRank;
+}
+
+// Apply unconditional skill ranks, level-scaled upgrades, dedication-specific skill upgrades, and saved choices.
+export function applyFeatSkillEffects(feat: FeatSelectionRecord, ranks: Record<SkillKey, ProficiencyRank>, actorLevel = 1): void {
+  for (const { skill, rank } of extractFeatSkillGrants(feat, actorLevel)) {
+    ranks[skill] = Math.max(ranks[skill], rank) as ProficiencyRank;
+  }
+  if (feat.featId === '4M5zIlJ8EvjQDtg9' || feat.featName === 'Dandy Dedication') {
+    upgradeTrainedOrExpert(ranks, 'deception');
+    upgradeTrainedOrExpert(ranks, 'society');
+  } else if (feat.featId === 'UyyrFtPWOo0qvXOv' || feat.featName === 'Zephyr Guard Dedication') {
+    upgradeTrainedOrExpert(ranks, 'society');
+  } else if (feat.featId === 'pI97a5xSg4LbBY1g' || feat.featName === 'Aldori Duelist Dedication') {
+    const chosen = ALL_SKILLS.find(s => s === feat.choices?.skillChoice);
+    if (chosen) upgradeTrainedOrExpert(ranks, chosen);
+    return;
+  }
+  if (feat.choices) {
+    for (const [key, value] of Object.entries(feat.choices)) {
+      if (key !== 'skillChoice' && key !== 'extraSkillChoice' && !key.startsWith('skillReplacement:')) continue;
+      const skill = ALL_SKILLS.find(s => s === value);
+      if (skill) ranks[skill] = Math.max(ranks[skill], 1) as ProficiencyRank;
+    }
   }
 }

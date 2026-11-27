@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { FeatFilters, FeatItem, FeatMetadata } from '../types/pf2e';
-import { fetchFeats, fetchFeatMetadata } from '../services/api';
+import { deleteFeat, fetchFeatById, fetchFeats, fetchFeatMetadata } from '../services/api';
 import { useI18n } from '../i18n/I18nContext';
 import { FeatFiltersBar } from './FeatFiltersBar';
 import { FeatCard } from './FeatCard';
 import { FeatTableView } from './FeatTableView';
 import { FeatDetailModal } from './FeatDetailModal';
-import { Loader2, Award } from 'lucide-react';
+import { Loader2, Award, Plus } from 'lucide-react';
+import { FeatEditorModal } from './FeatEditorModal';
+import { ConfirmDialog } from './ConfirmDialog';
 
 const INITIAL_FEAT_FILTERS: FeatFilters = {
   search: '',
@@ -21,7 +23,7 @@ const INITIAL_FEAT_FILTERS: FeatFilters = {
   offset: 0
 };
 
-export const FeatExplorerView: React.FC = () => {
+export const FeatExplorerView: React.FC<{ characterLevel?: number }> = ({ characterLevel }) => {
   const { t } = useI18n();
   const [filters, setFilters] = useState<FeatFilters>(INITIAL_FEAT_FILTERS);
   const [metadata, setMetadata] = useState<FeatMetadata | null>(null);
@@ -31,6 +33,10 @@ export const FeatExplorerView: React.FC = () => {
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [selectedFeat, setSelectedFeat] = useState<FeatItem | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
+  const [editor, setEditor] = useState<{ feat: FeatItem | null } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<FeatItem | null>(null);
+  const [error, setError] = useState('');
+  const [working, setWorking] = useState(false);
 
   // Favorites state persisted in localStorage
   const [favorites, setFavorites] = useState<Set<string>>(() => {
@@ -121,8 +127,47 @@ export const FeatExplorerView: React.FC = () => {
     setFilters((prev) => ({ ...prev, offset: prev.offset + prev.limit }));
   };
 
+  const refresh = () => {
+    void fetchFeatMetadata().then(setMetadata).catch(console.error);
+    setFilters(previous => ({ ...previous, offset: 0 }));
+  };
+
+  const editFeat = async (feat: FeatItem) => {
+    setWorking(true);
+    setError('');
+    try {
+      const fullFeat = await fetchFeatById(feat.id);
+      setSelectedFeat(null);
+      setEditor({ feat: fullFeat });
+    } catch { setSelectedFeat(null); setError(t('featEditor.loadError')); }
+    finally { setWorking(false); }
+  };
+
+  const removeFeat = async () => {
+    if (!deleteTarget || working) return;
+    setWorking(true);
+    setError('');
+    try {
+      await deleteFeat(deleteTarget.id);
+      setFavorites(previous => {
+        const next = new Set(previous);
+        next.delete(deleteTarget.id);
+        try { localStorage.setItem('pf2e_favorite_feats', JSON.stringify(Array.from(next))); } catch { /* Ignore unavailable storage. */ }
+        return next;
+      });
+      setDeleteTarget(null);
+      setSelectedFeat(null);
+      refresh();
+    } catch { setDeleteTarget(null); setError(t('featEditor.deleteError')); }
+    finally { setWorking(false); }
+  };
+
   return (
     <div className="space-y-6">
+      <div className="flex justify-end"><button type="button" onClick={() => setEditor({ feat: null })} className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 font-semibold text-accent-contrast"><Plus className="w-4 h-4" />{t('featEditor.create')}</button></div>
+      {error && <p role="alert" className="rounded-lg border border-status-danger-border bg-status-danger-bg p-3 text-status-danger">{error}</p>}
+      {editor && <FeatEditorModal feat={editor.feat} onClose={() => setEditor(null)} onSaved={() => { setEditor(null); refresh(); }} />}
+      {deleteTarget && <ConfirmDialog title={t('featEditor.delete')} message={t('featEditor.deleteConfirm', { name: deleteTarget.name })} variant="danger" confirmLabel={t('common.remove')} onCancel={() => { setSelectedFeat(deleteTarget); setDeleteTarget(null); }} onConfirm={() => { void removeFeat(); }} />}
       {/* Filters Bar */}
       <FeatFiltersBar
         filters={filters}
@@ -158,11 +203,12 @@ export const FeatExplorerView: React.FC = () => {
           </button>
         </div>
       ) : viewMode === 'grid' ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        <div className="compendium-cards">
           {feats.map((feat) => (
             <FeatCard
               key={feat.id}
               feat={feat}
+              characterLevel={characterLevel}
               isFavorite={favorites.has(feat.id)}
               onToggleFavorite={() => toggleFavorite(feat.id)}
               onClick={() => setSelectedFeat(feat)}
@@ -204,10 +250,13 @@ export const FeatExplorerView: React.FC = () => {
       {selectedFeat && (
         <FeatDetailModal
           feat={selectedFeat}
+          characterLevel={characterLevel}
           isFavorite={favorites.has(selectedFeat.id)}
           onToggleFavorite={() => toggleFavorite(selectedFeat.id)}
           onClose={() => setSelectedFeat(null)}
           onSelectTrait={handleSelectTrait}
+          onEdit={working ? undefined : () => { void editFeat(selectedFeat); }}
+          onDelete={working ? undefined : () => { setDeleteTarget(selectedFeat); setSelectedFeat(null); }}
         />
       )}
     </div>

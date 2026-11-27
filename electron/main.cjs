@@ -1,21 +1,32 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { startLocalServer } = require('./apiServer.cjs');
+const { startLocalServer, resolveSqlJsWasmPath } = require('./apiServer.cjs');
+const { upgradeCatalog } = require('./catalog-upgrade.cjs');
 
 let mainWindow = null;
 let localServer = null;
 
-function ensureDatabasePath() {
+// The catalog (pf2e.db) is replaced whenever the app version changes; user-created content and
+// legacy characters are carried over (see catalog-upgrade.cjs). A backup stays at pf2e.db.bak.
+async function ensureDatabasePath() {
   if (!app.isPackaged) {
     return path.resolve(__dirname, '../pf2e.db');
   }
   const userDbPath = path.join(app.getPath('userData'), 'pf2e.db');
+  const markerPath = path.join(app.getPath('userData'), 'catalog-version.txt');
+  const bundledDbPath = path.join(process.resourcesPath, 'pf2e.db');
   if (!fs.existsSync(userDbPath)) {
-    const bundledDbPath = path.join(process.resourcesPath, 'pf2e.db');
     fs.mkdirSync(path.dirname(userDbPath), { recursive: true });
     fs.copyFileSync(bundledDbPath, userDbPath);
+  } else {
+    const installed = fs.existsSync(markerPath) ? fs.readFileSync(markerPath, 'utf8').trim() : '';
+    if (installed === app.getVersion()) return userDbPath;
+    const initSqlJs = require('sql.js');
+    const SQL = await initSqlJs({ locateFile: () => resolveSqlJsWasmPath() });
+    upgradeCatalog(SQL, userDbPath, bundledDbPath);
   }
+  fs.writeFileSync(markerPath, app.getVersion());
   return userDbPath;
 }
 
@@ -24,7 +35,7 @@ async function createWindow() {
   let targetUrl = 'http://127.0.0.1:5173';
 
   if (!isViteDev) {
-    const dbPath = ensureDatabasePath();
+    const dbPath = await ensureDatabasePath();
     const distDir = path.resolve(__dirname, '../dist');
     const iconsDir = app.isPackaged
       ? path.join(distDir, 'assets/icons/spells')
@@ -39,6 +50,7 @@ async function createWindow() {
     minWidth: 1024,
     minHeight: 700,
     title: 'PF2e Manager',
+    icon: path.join(__dirname, app.isPackaged ? '../dist/assets/app-icon.png' : '../public/assets/app-icon.png'),
     backgroundColor: '#0e1217',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

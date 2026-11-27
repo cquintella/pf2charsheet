@@ -2,6 +2,10 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
+const { saveFeat, deleteFeat } = require('./feat-store.cjs');
+const { saveCatalogEntry, deleteCatalogEntry } = require('./catalog-store.cjs');
+const { changeSource } = require('./source-store.cjs');
+const { listCustomPortraits, addCustomPortrait, getPortraitPlugin } = require('./portrait-store.cjs');
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -29,6 +33,7 @@ function resolveSqlJsWasmPath() {
 }
 
 function createDbAdapter(sqlDb, dbPath) {
+  let inTransaction = false;
   const persist = () => {
     const data = Buffer.from(sqlDb.export());
     const tmpPath = `${dbPath}.tmp`;
@@ -73,9 +78,24 @@ function createDbAdapter(sqlDb, dbPath) {
           } finally {
             stmt.free();
           }
-          persist();
+          if (!inTransaction) persist();
         },
       };
+    },
+    transaction(callback) {
+      sqlDb.run('BEGIN');
+      inTransaction = true;
+      try {
+        const result = callback();
+        sqlDb.run('COMMIT');
+        inTransaction = false;
+        persist();
+        return result;
+      } catch (error) {
+        if (inTransaction) sqlDb.run('ROLLBACK');
+        inTransaction = false;
+        throw error;
+      }
     },
     close() {
       sqlDb.close();
@@ -119,7 +139,62 @@ function sendJson(res, payload, statusCode = 200) {
   res.end(JSON.stringify(payload));
 }
 
-async function startLocalServer({ dbPath, distDir, iconsDir }) {
+const USER_SCHEMA = `
+CREATE TABLE IF NOT EXISTS characters (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  level INTEGER DEFAULT 1,
+  ancestry TEXT,
+  heritage TEXT,
+  background TEXT,
+  class TEXT,
+  subclass TEXT,
+  data_json TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS spellbooks (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  tradition TEXT DEFAULT 'arcane',
+  caster_class TEXT,
+  description TEXT,
+  spells_json TEXT DEFAULT '[]',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_spellbooks_updated ON spellbooks(updated_at);
+`;
+
+/**
+ * Opens user.db (characters + spellbooks). On first run (user_version = 0) copies the rows
+ * that older versions kept inside the catalog DB. The old rows are left untouched there.
+ */
+function openUserDb(SQL, userDbPath, catalogDb) {
+  const exists = fs.existsSync(userDbPath);
+  const sqlDb = exists ? new SQL.Database(fs.readFileSync(userDbPath)) : new SQL.Database();
+  sqlDb.exec(USER_SCHEMA);
+  const userDb = createDbAdapter(sqlDb, userDbPath);
+  const version = userDb.prepare('PRAGMA user_version').get().user_version;
+  if (version === 0) {
+    userDb.transaction(() => {
+      for (const table of ['characters', 'spellbooks']) {
+        const hasTable = catalogDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table);
+        if (!hasTable) continue;
+        const rows = catalogDb.prepare(`SELECT * FROM ${table}`).all();
+        for (const row of rows) {
+          const columns = Object.keys(row);
+          userDb.prepare(`INSERT OR IGNORE INTO ${table} (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})`)
+            .run(...columns.map((c) => row[c]));
+        }
+      }
+      sqlDb.run('PRAGMA user_version = 1');
+    });
+  }
+  return userDb;
+}
+
+async function startLocalServer({ dbPath, userDbPath, distDir, iconsDir }) {
   const initSqlJs = require('sql.js');
   const wasmPath = resolveSqlJsWasmPath();
   const SQL = await initSqlJs({
@@ -129,9 +204,14 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
   const fileBuffer = fs.readFileSync(dbPath);
   const sqlDb = new SQL.Database(fileBuffer);
   const db = createDbAdapter(sqlDb, dbPath);
+  const userDb = openUserDb(SQL, userDbPath || path.join(path.dirname(dbPath), 'user.db'), db);
+  db.prepare("CREATE TABLE IF NOT EXISTS sources (name TEXT PRIMARY KEY COLLATE NOCASE, edition TEXT NOT NULL DEFAULT '')").run();
+  if (!db.prepare('PRAGMA table_info(sources)').all().some(column => column.name === 'edition')) db.prepare("ALTER TABLE sources ADD COLUMN edition TEXT NOT NULL DEFAULT ''").run();
 
   const server = http.createServer((req, res) => {
     const parsedUrl = url.parse(req.url || '/', true);
+    // url.parse() returns the legacy Url object, which has no searchParams.
+    parsedUrl.searchParams = new URLSearchParams(parsedUrl.search || "");
     let pathname = parsedUrl.pathname || '/';
     try {
       pathname = decodeURIComponent(pathname);
@@ -139,6 +219,34 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
       /* keep raw pathname */
     }
     const method = req.method || 'GET';
+
+    if (pathname === '/api/sources' && method === 'GET') {
+      try {
+        const rows = db.prepare("SELECT names.name, COALESCE(s.edition,'') AS edition FROM (SELECT name FROM sources UNION SELECT TRIM(source) AS name FROM items WHERE source IS NOT NULL AND TRIM(source) != '') names LEFT JOIN sources s ON s.name=names.name COLLATE NOCASE ORDER BY names.name COLLATE NOCASE").all();
+        return sendJson(res, parsedUrl.query.details === '1' ? rows : rows.map(row => row.name));
+      }
+      catch (err) { return sendJson(res, { error: err.message }, 500); }
+    }
+    if (pathname === '/api/sources' && method === 'POST') {
+      readJsonBody(req).then(data => {
+        const name = typeof data?.name === 'string' ? data.name.trim() : '';
+        const edition = data?.edition || '';
+        if (!name || name.length > 200 || !['','1e','2e','2r'].includes(edition)) return sendJson(res, { error: 'Invalid source name or edition' }, 400);
+        try { db.prepare('INSERT INTO sources (name,edition) VALUES (?,?) ON CONFLICT(name) DO NOTHING').run(name,edition); return sendJson(res, { name }, 201); }
+        catch (err) { return sendJson(res, { error: err.message }, 500); }
+      }).catch(() => sendJson(res, { error: 'Invalid JSON' }, 400));
+      return;
+    }
+    if (pathname === '/api/sources' && (method === 'PUT' || method === 'DELETE')) {
+      readJsonBody(req).then(data => {
+        try {
+          if (method === 'PUT' && (typeof data?.name !== 'string' || !data.name.trim())) return sendJson(res, { error: 'Invalid source name' }, 400);
+          const result = changeSource(db, data?.previousName, method === 'DELETE' ? '' : data.name, method === 'DELETE' ? '' : data.edition || '');
+          return result ? sendJson(res, result) : sendJson(res, { error: 'Source not found' }, 404);
+        } catch (err) { return sendJson(res, { error: err.message }, 400); }
+      }).catch(() => sendJson(res, { error: 'Invalid JSON' }, 400));
+      return;
+    }
 
     // ANCESTRIES ENDPOINT
     if (pathname === '/api/ancestries' && method === 'GET') {
@@ -262,7 +370,7 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
     if (pathname === '/api/characters') {
       if (method === 'GET') {
         try {
-          const rows = db.prepare(`
+          const rows = userDb.prepare(`
             SELECT id, name, level, ancestry, heritage, background, class, subclass, data_json, created_at, updated_at
             FROM characters
             ORDER BY updated_at DESC
@@ -287,7 +395,7 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
               const subclass = data.subclass || '';
               const dataJson = typeof data.data === 'string' ? data.data : JSON.stringify(data.data || {});
 
-              db.prepare(`
+              userDb.prepare(`
                 INSERT INTO characters (id, name, level, ancestry, heritage, background, class, subclass, data_json, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
@@ -315,7 +423,7 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
     if (pathname.startsWith('/api/characters/') && method === 'DELETE') {
       const id = pathname.replace('/api/characters/', '');
       try {
-        db.prepare('DELETE FROM characters WHERE id = ?').run(id);
+        userDb.prepare('DELETE FROM characters WHERE id = ?').run(id);
         return sendJson(res, { success: true });
       } catch (err) {
         return sendJson(res, { error: err.message }, 500);
@@ -368,7 +476,7 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
     if (pathname === '/api/spellbooks') {
       if (method === 'GET') {
         try {
-          const rows = db.prepare(`
+          const rows = userDb.prepare(`
             SELECT id, name, tradition, caster_class, description, spells_json, created_at, updated_at
             FROM spellbooks
             ORDER BY updated_at DESC
@@ -390,7 +498,7 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
               const description = data.description || '';
               const spellsJson = typeof data.spells === 'string' ? data.spells : JSON.stringify(data.spells || []);
 
-              db.prepare(`
+              userDb.prepare(`
                 INSERT INTO spellbooks (id, name, tradition, caster_class, description, spells_json, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
               `).run(id, name, tradition, casterClass, description, spellsJson);
@@ -410,7 +518,7 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
 
       if (method === 'GET') {
         try {
-          const sb = db.prepare('SELECT * FROM spellbooks WHERE id = ?').get(id);
+          const sb = userDb.prepare('SELECT * FROM spellbooks WHERE id = ?').get(id);
           if (!sb) return sendJson(res, { error: 'Grimório não encontrado' }, 404);
 
           let spellIds = [];
@@ -449,7 +557,7 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
               const description = data.description;
               const spellsJson = typeof data.spells === 'string' ? data.spells : JSON.stringify(data.spells || []);
 
-              db.prepare(`
+              userDb.prepare(`
                 UPDATE spellbooks
                 SET name = COALESCE(?, name),
                     tradition = COALESCE(?, tradition),
@@ -471,7 +579,7 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
 
       if (method === 'DELETE') {
         try {
-          db.prepare('DELETE FROM spellbooks WHERE id = ?').run(id);
+          userDb.prepare('DELETE FROM spellbooks WHERE id = ?').run(id);
           return sendJson(res, { success: true });
         } catch (err) {
           return sendJson(res, { error: err.message }, 500);
@@ -510,6 +618,22 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
       } catch (err) {
         return sendJson(res, { error: err.message }, 500);
       }
+    }
+
+    const catalogMatch = pathname.match(/^\/api\/(spells|equipment)(?:\/([^/]+))?$/);
+    if (catalogMatch && ((method === 'POST' && !catalogMatch[2]) || (method === 'PUT' && catalogMatch[2]))) {
+      const entryType = catalogMatch[1] === 'spells' ? 'spell' : 'equipment';
+      readJsonBody(req).then(data => {
+        try {
+          const id = saveCatalogEntry(db, entryType, data, catalogMatch[2]);
+          return id ? sendJson(res, { id }, method === 'POST' ? 201 : 200) : sendJson(res, { error: 'Not found' }, 404);
+        } catch (err) { return sendJson(res, { error: err.message }, 400); }
+      }).catch(() => sendJson(res, { error: 'Invalid JSON' }, 400));
+      return;
+    }
+    if (catalogMatch && catalogMatch[2] && method === 'DELETE') {
+      try { return deleteCatalogEntry(db, catalogMatch[1] === 'spells' ? 'spell' : 'equipment', catalogMatch[2]) ? sendJson(res, { success: true }) : sendJson(res, { error: 'Not found' }, 404); }
+      catch (err) { return sendJson(res, { error: err.message }, 500); }
     }
 
     // SPELLS QUERY ENDPOINT
@@ -674,7 +798,7 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
         const where = conditions.join(' AND ');
         const total = db.prepare(`SELECT count(*) AS total FROM equipment e WHERE ${where}`).get(...params).total;
         const items = db
-          .prepare(`SELECT e.id, e.name, e.item_type, e.level, e.price, e.bulk, e.description, e.system_json, e.traits, e.rarity, i.img FROM equipment e LEFT JOIN items i ON e.id = i.id WHERE ${where} ORDER BY e.name LIMIT 40 OFFSET ?`)
+          .prepare(`SELECT e.id, e.name, e.item_type, e.level, e.price, e.bulk, e.description, e.system_json, e.traits, e.rarity, i.img, i.source FROM equipment e LEFT JOIN items i ON e.id = i.id WHERE ${where} ORDER BY e.name LIMIT 40 OFFSET ?`)
           .all(...params, offset);
         return sendJson(res, { items, total });
       } catch (err) {
@@ -712,6 +836,54 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
         });
       } catch (err) {
         return sendJson(res, { error: err.message }, 500);
+      }
+    }
+
+    if ((pathname === '/api/feats' && method === 'POST') || (pathname.startsWith('/api/feats/') && method === 'PUT')) {
+      const id = method === 'PUT' ? pathname.slice('/api/feats/'.length) : undefined;
+      readJsonBody(req).then(data => {
+        try {
+          const savedId = saveFeat(db, data, id);
+          return savedId ? sendJson(res, { id: savedId }, method === 'POST' ? 201 : 200) : sendJson(res, { error: 'Feat not found' }, 404);
+        } catch (err) { return sendJson(res, { error: err.message }, 400); }
+      }).catch(() => sendJson(res, { error: 'Invalid JSON' }, 400));
+      return;
+    }
+
+    if (pathname.startsWith('/api/feats/') && method === 'DELETE') {
+      try {
+        return deleteFeat(db, pathname.slice('/api/feats/'.length)) ? sendJson(res, { success: true }) : sendJson(res, { error: 'Feat not found' }, 404);
+      } catch (err) { return sendJson(res, { error: err.message }, 500); }
+    }
+
+    // PORTRAIT DB PLUGIN & CUSTOM ENTRIES
+    if (pathname === '/api/portraitdb/plugin' && method === 'GET') {
+      const projectRoot = path.resolve(__dirname, '..');
+      try {
+        return sendJson(res, getPortraitPlugin(projectRoot));
+      } catch (err) {
+        return sendJson(res, { error: err.message }, 500);
+      }
+    }
+    if (pathname === '/api/portraitdb') {
+      const projectRoot = path.resolve(__dirname, '..');
+      if (method === 'GET') {
+        try {
+          return sendJson(res, listCustomPortraits(projectRoot));
+        } catch (err) {
+          return sendJson(res, { error: err.message }, 500);
+        }
+      }
+      if (method === 'POST') {
+        readBody().then((data) => {
+          try {
+            const entry = addCustomPortrait(projectRoot, data);
+            return sendJson(res, { success: true, item: entry }, 201);
+          } catch (err) {
+            return sendJson(res, { error: err.message }, 400);
+          }
+        }).catch(() => sendJson(res, { error: 'Invalid JSON' }, 400));
+        return;
       }
     }
 
@@ -791,7 +963,7 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
             SELECT
               f.id, f.name, f.slug, f.category, f.level, f.action_type,
               f.actions, f.prerequisites, f.traits, f.description,
-              f.system_json, i.img, i.rarity
+              f.system_json, i.img, i.rarity, i.source
             FROM feats f
             JOIN items i ON f.id = i.id
             ${whereClause}
@@ -851,6 +1023,7 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
         port: address.port,
         close: () => {
           server.close();
+          userDb.close();
           db.close();
         },
       });
@@ -858,4 +1031,4 @@ async function startLocalServer({ dbPath, distDir, iconsDir }) {
   });
 }
 
-module.exports = { startLocalServer };
+module.exports = { startLocalServer, createDbAdapter, resolveSqlJsWasmPath };

@@ -26,7 +26,7 @@ export const LevelSquares: React.FC<LevelSquaresProps> = ({ label, value, max, o
             aria-label={t('common.level', { level })}
             title={selected ? t('session.clearCondition', { condition: label }) : t('common.level', { level })}
             onClick={() => onChange(selected ? 0 : level)}
-            className="group relative grid h-7 w-[21px] place-items-center rounded text-[11px] font-bold tabular-nums focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+            className="group relative grid h-7 w-[21px] place-items-center rounded text-xs font-bold tabular-nums focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
           >
             <span
               aria-hidden="true"

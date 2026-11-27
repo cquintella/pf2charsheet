@@ -4,6 +4,10 @@ import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import url from 'url';
 import fs from 'fs';
+import featStore from './electron/feat-store.cjs';
+import catalogStore from './electron/catalog-store.cjs';
+import sourceStore from './electron/source-store.cjs';
+import portraitStore from './electron/portrait-store.cjs';
 
 function sqlitePlugin() {
   let db: any = null;
@@ -11,8 +15,10 @@ function sqlitePlugin() {
   return {
     name: 'pf2e-sqlite-api',
     configureServer(server: any) {
-      const dbPath = path.resolve(__dirname, 'pf2e.db');
+      const dbPath = path.resolve(import.meta.dirname, 'pf2e.db');
       db = new DatabaseSync(dbPath);
+      db.exec("CREATE TABLE IF NOT EXISTS sources (name TEXT PRIMARY KEY COLLATE NOCASE, edition TEXT NOT NULL DEFAULT '')");
+      if (!db.prepare('PRAGMA table_info(sources)').all().some((column: { name: string }) => column.name === 'edition')) db.exec("ALTER TABLE sources ADD COLUMN edition TEXT NOT NULL DEFAULT ''");
 
       server.middlewares.use((req: any, res: any, next: any) => {
         const parsedUrl = url.parse(req.url, true);
@@ -30,6 +36,32 @@ function sqlitePlugin() {
             }
           });
         });
+
+        if (pathname === '/api/sources' && method === 'GET') {
+          try { const rows = db.prepare("SELECT names.name, COALESCE(s.edition,'') AS edition FROM (SELECT name FROM sources UNION SELECT TRIM(source) AS name FROM items WHERE source IS NOT NULL AND TRIM(source) != '') names LEFT JOIN sources s ON s.name=names.name COLLATE NOCASE ORDER BY names.name COLLATE NOCASE").all(); res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(parsedUrl.query.details === '1' ? rows : rows.map((row: { name: string }) => row.name))); }
+          catch (err: any) { res.statusCode = 500; res.end(JSON.stringify({ error: err.message })); }
+          return;
+        }
+        if (pathname === '/api/sources' && method === 'POST') {
+          readBody().then(data => {
+            const name = typeof data?.name === 'string' ? data.name.trim() : '';
+            const edition = data?.edition || '';
+            if (!name || name.length > 200 || !['','1e','2e','2r'].includes(edition)) { res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid source name or edition' })); return; }
+            try { db.prepare('INSERT INTO sources (name,edition) VALUES (?,?) ON CONFLICT(name) DO NOTHING').run(name,edition); res.statusCode = 201; res.end(JSON.stringify({ name })); }
+            catch (err: any) { res.statusCode = 500; res.end(JSON.stringify({ error: err.message })); }
+          }).catch(() => { res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid JSON' })); });
+          return;
+        }
+        if (pathname === '/api/sources' && (method === 'PUT' || method === 'DELETE')) {
+          readBody().then(data => {
+            try {
+              if (method === 'PUT' && (typeof data?.name !== 'string' || !data.name.trim())) { res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid source name' })); return; }
+              const result = sourceStore.changeSource(db, data?.previousName, method === 'DELETE' ? '' : data.name, method === 'DELETE' ? '' : data.edition || '');
+              res.statusCode = result ? 200 : 404; res.end(JSON.stringify(result || { error: 'Source not found' }));
+            } catch (err: any) { res.statusCode = 400; res.end(JSON.stringify({ error: err.message })); }
+          }).catch(() => { res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid JSON' })); });
+          return;
+        }
 
         // ANCESTRIES ENDPOINT
         if (pathname === '/api/ancestries' && method === 'GET') {
@@ -250,7 +282,7 @@ function sqlitePlugin() {
         // LIST SPELL ICONS ENDPOINT
         if (pathname === '/api/icons/spells' && method === 'GET') {
           try {
-            const iconsDir = path.resolve(__dirname, 'public/assets/icons/spells');
+            const iconsDir = path.resolve(import.meta.dirname, 'public/assets/icons/spells');
             if (!fs.existsSync(iconsDir)) {
               res.setHeader('Content-Type', 'application/json');
               res.end(JSON.stringify([]));
@@ -471,6 +503,21 @@ function sqlitePlugin() {
         }
 
         // SPELLS QUERY ENDPOINT
+        const catalogMatch = pathname.match(/^\/api\/(spells|equipment)(?:\/([^/]+))?$/);
+        if (catalogMatch && ((method === 'POST' && !catalogMatch[2]) || (method === 'PUT' && catalogMatch[2]))) {
+          const entryType = catalogMatch[1] === 'spells' ? 'spell' : 'equipment';
+          readBody().then(data => {
+            try { const id = catalogStore.saveCatalogEntry(db, entryType, data, catalogMatch[2]); res.statusCode = id ? (method === 'POST' ? 201 : 200) : 404; res.end(JSON.stringify(id ? { id } : { error: 'Not found' })); }
+            catch (err: any) { res.statusCode = 400; res.end(JSON.stringify({ error: err.message })); }
+          }).catch(() => { res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid JSON' })); });
+          return;
+        }
+        if (catalogMatch && catalogMatch[2] && method === 'DELETE') {
+          try { const deleted = catalogStore.deleteCatalogEntry(db, catalogMatch[1] === 'spells' ? 'spell' : 'equipment', catalogMatch[2]); res.statusCode = deleted ? 200 : 404; res.end(JSON.stringify(deleted ? { success: true } : { error: 'Not found' })); }
+          catch (err: any) { res.statusCode = 500; res.end(JSON.stringify({ error: err.message })); }
+          return;
+        }
+
         if (pathname === '/api/spells') {
           try {
             const query = parsedUrl.query;
@@ -629,7 +676,7 @@ function sqlitePlugin() {
             }
             const where = conditions.join(' AND ');
             const total = db.prepare(`SELECT count(*) AS total FROM equipment e WHERE ${where}`).get(...params).total;
-            const items = db.prepare(`SELECT e.id, e.name, e.item_type, e.level, e.price, e.bulk, e.description, e.system_json, e.traits, e.rarity, i.img FROM equipment e LEFT JOIN items i ON e.id = i.id WHERE ${where} ORDER BY e.name LIMIT 40 OFFSET ?`).all(...params, offset);
+            const items = db.prepare(`SELECT e.id, e.name, e.item_type, e.level, e.price, e.bulk, e.description, e.system_json, e.traits, e.rarity, i.img, i.source FROM equipment e LEFT JOIN items i ON e.id = i.id WHERE ${where} ORDER BY e.name LIMIT 40 OFFSET ?`).all(...params, offset);
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify({ items, total }));
           } catch (err: any) {
@@ -676,6 +723,28 @@ function sqlitePlugin() {
         }
 
         // FEATS QUERY ENDPOINT
+        if ((pathname === '/api/feats' && method === 'POST') || (pathname.startsWith('/api/feats/') && method === 'PUT')) {
+          const id = method === 'PUT' ? pathname.slice('/api/feats/'.length) : undefined;
+          readBody().then(data => {
+            try {
+              const savedId = featStore.saveFeat(db, data, id);
+              res.statusCode = savedId ? (method === 'POST' ? 201 : 200) : 404;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify(savedId ? { id: savedId } : { error: 'Feat not found' }));
+            } catch (err: any) { res.statusCode = 400; res.end(JSON.stringify({ error: err.message })); }
+          }).catch(() => { res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid JSON' })); });
+          return;
+        }
+
+        if (pathname.startsWith('/api/feats/') && method === 'DELETE') {
+          try {
+            const deleted = featStore.deleteFeat(db, pathname.slice('/api/feats/'.length));
+            res.statusCode = deleted ? 200 : 404;
+            res.end(JSON.stringify(deleted ? { success: true } : { error: 'Feat not found' }));
+          } catch (err: any) { res.statusCode = 500; res.end(JSON.stringify({ error: err.message })); }
+          return;
+        }
+
         if (pathname === '/api/feats') {
           try {
             const query = parsedUrl.query;
@@ -752,7 +821,7 @@ function sqlitePlugin() {
               SELECT 
                 f.id, f.name, f.slug, f.category, f.level, f.action_type, 
                 f.actions, f.prerequisites, f.traits, f.description, 
-                f.system_json, i.img, i.rarity
+                f.system_json, i.img, i.rarity, i.source
               FROM feats f
               JOIN items i ON f.id = i.id
               ${whereClause}
@@ -796,6 +865,46 @@ function sqlitePlugin() {
           }
         }
 
+        if (pathname === '/api/portraitdb/plugin' && method === 'GET') {
+          try {
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify(portraitStore.getPortraitPlugin(import.meta.dirname)));
+          } catch (err: any) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: err.message }));
+          }
+          return;
+        }
+        if (pathname === '/api/portraitdb') {
+          if (method === 'GET') {
+            try {
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify(portraitStore.listCustomPortraits(import.meta.dirname)));
+            } catch (err: any) {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: err.message }));
+            }
+            return;
+          }
+          if (method === 'POST') {
+            readBody().then((data) => {
+              try {
+                const entry = portraitStore.addCustomPortrait(import.meta.dirname, data);
+                res.statusCode = 201;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ success: true, item: entry }));
+              } catch (err: any) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: err.message }));
+              }
+            }).catch(() => {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: 'Invalid JSON' }));
+            });
+            return;
+          }
+        }
+
         next();
       });
     }
@@ -804,11 +913,6 @@ function sqlitePlugin() {
 
 export default defineConfig({
   plugins: [react(), sqlitePlugin()],
-  resolve: {
-    alias: {
-      '@portraitdb': path.resolve(__dirname, '../portraitdb/index.ts'),
-    },
-  },
   base: './',
   server: {
     port: 5173,

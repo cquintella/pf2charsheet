@@ -3,11 +3,13 @@ import { EquipmentItem } from '../types/pf2e';
 import { ITEM_TYPES, itemTypeLabel, weaponDamage } from '../utils/weapon';
 import { useI18n } from '../i18n/I18nContext';
 import { rarityLabel } from '../i18n/gameTerms';
-import { fetchEquipment } from '../services/api';
+import { deleteCatalogEntry, fetchEquipment } from '../services/api';
 import { cleanDescriptionHtml, cleanSnippetText, resolvePf2eIcon } from '../utils/formatters';
 import { useModalFocus, clickableProps } from '../utils/useModalFocus';
 import { IconButton } from './IconButton';
-import { Package, Search, Star, X, LayoutGrid, List, RotateCcw, Loader2, ArrowUp, ArrowDown, ArrowUpDown, Plus, CheckCircle2 } from 'lucide-react';
+import { Package, Search, Star, X, LayoutGrid, List, RotateCcw, Loader2, ArrowUp, ArrowDown, ArrowUpDown, Plus, CheckCircle2, Pencil, Trash2 } from 'lucide-react';
+import { CatalogEditorModal } from './CatalogEditorModal';
+import { ConfirmDialog } from './ConfirmDialog';
 
 const control = 'bg-inset border border-border-strong rounded-lg px-3 py-2 text-sm text-text-primary focus:border-accent';
 
@@ -48,6 +50,11 @@ export const EquipmentExplorerView: React.FC<EquipmentExplorerViewProps> = ({
   const [items, setItems] = useState<EquipmentItem[]>([]);
   const [total, setTotal] = useState(0);
   const [selected, setSelected] = useState<EquipmentItem | null>(null);
+  const [editor, setEditor] = useState<{ item: EquipmentItem | null } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<EquipmentItem | null>(null);
+  const [actionError, setActionError] = useState('');
+  const [working, setWorking] = useState(false);
+  const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(false);
@@ -88,7 +95,7 @@ export const EquipmentExplorerView: React.FC<EquipmentExplorerViewProps> = ({
         });
     }, 200);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [search, type, level, rarity, offset, onlyFavorites]);
+  }, [search, type, level, rarity, offset, onlyFavorites, revision]);
 
   useEffect(() => {
     if (onlyFavorites) {
@@ -114,6 +121,18 @@ export const EquipmentExplorerView: React.FC<EquipmentExplorerViewProps> = ({
     setOnlyFavorites(false);
     setOffset(0);
     setSelected(null);
+  };
+
+  const refreshCatalog = () => { setOffset(0); setRevision(value => value + 1); };
+  const removeItem = async () => {
+    if (!deleteTarget || working) return;
+    setWorking(true); setActionError('');
+    try {
+      await deleteCatalogEntry('equipment', deleteTarget.id);
+      if (favorites.has(deleteTarget.id)) toggleFavorite(deleteTarget.id);
+      setDeleteTarget(null); refreshCatalog();
+    } catch { setDeleteTarget(null); setActionError(t('catalogEditor.deleteError')); }
+    finally { setWorking(false); }
   };
 
   const handleSort = (field: EquipSortField) => {
@@ -171,6 +190,9 @@ export const EquipmentExplorerView: React.FC<EquipmentExplorerViewProps> = ({
 
   return (
     <div className="space-y-5">
+      {editor && <CatalogEditorModal kind="equipment" entry={editor.item} onClose={() => setEditor(null)} onSaved={() => { setEditor(null); refreshCatalog(); }} />}
+      {deleteTarget && <ConfirmDialog title={t('catalogEditor.deleteItem')} message={t('catalogEditor.deleteConfirm', { name: deleteTarget.name })} variant="danger" confirmLabel={t('common.remove')} onCancel={() => { setSelected(deleteTarget); setDeleteTarget(null); }} onConfirm={() => { void removeItem(); }} />}
+      {actionError && <p role="alert" className="rounded-lg border border-status-danger-border bg-status-danger-bg p-3 text-status-danger">{actionError}</p>}
       <div className="bg-surface border border-border-subtle rounded-2xl p-5 space-y-4 shadow-xl">
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -179,6 +201,7 @@ export const EquipmentExplorerView: React.FC<EquipmentExplorerViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap justify-end">
+            <button type="button" onClick={() => setEditor({ item: null })} className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 font-semibold text-accent-contrast"><Plus className="w-4 h-4" />{t('catalogEditor.newItem')}</button>
             <IconButton
               onClick={() => { setOnlyFavorites(v => !v); setOffset(0); }}
               active={onlyFavorites}
@@ -212,6 +235,7 @@ export const EquipmentExplorerView: React.FC<EquipmentExplorerViewProps> = ({
             <input
               className={`${control} w-full pl-9 pr-8`}
               value={search}
+              data-shortcut-search
               placeholder={t('items.searchPlaceholder')}
               onChange={e => { setSearch(e.target.value); setOffset(0); }}
             />
@@ -245,7 +269,7 @@ export const EquipmentExplorerView: React.FC<EquipmentExplorerViewProps> = ({
 
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-text-muted">
           <span>{t('items.found', { count: total })}</span>
-          {locale === 'pt-BR' && <span className="text-[11px]">{t('compendium.englishNotice')}</span>}
+          {locale === 'pt-BR' && <span className="text-xs">{t('compendium.englishNotice')}</span>}
         </div>
         {addedFeedback && (
           <div className="p-2.5 rounded-xl bg-status-success-bg border border-status-success-border text-xs text-status-success flex items-center gap-2">
@@ -267,7 +291,7 @@ export const EquipmentExplorerView: React.FC<EquipmentExplorerViewProps> = ({
           <p className="text-sm text-text-muted">{t('items.noResults')}</p>
         </div>
       ) : view === 'grid' ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        <div className="compendium-cards">
           {items.map(item => (
             <article
               key={item.id}
@@ -296,7 +320,7 @@ export const EquipmentExplorerView: React.FC<EquipmentExplorerViewProps> = ({
       ) : (
         <div className="w-full overflow-x-auto rounded-xl border border-border-subtle bg-surface shadow">
           <table className="w-full text-left text-xs text-text-secondary">
-            <thead className="bg-elevated text-text-muted uppercase text-[11px] tracking-wider border-b border-border-strong">
+            <thead className="bg-elevated text-text-muted uppercase text-xs tracking-wider border-b border-border-strong">
               <tr>
                 {renderSortHeader('favorite', '⭐', 'w-12 text-center')}
                 {renderSortHeader('level', t('common.levelLabel'), 'w-20 text-center')}
@@ -360,6 +384,8 @@ export const EquipmentExplorerView: React.FC<EquipmentExplorerViewProps> = ({
                 <p className="text-xs text-text-muted">{itemTypeLabel(t, selected.item_type)} · {t('common.level', { level: selected.level })} · {rarityLabel(t, selected.rarity)}</p>
               </div>
               <div className="flex items-center gap-2">
+                <button type="button" onClick={() => { setEditor({ item: selected }); setSelected(null); }} aria-label={t('catalogEditor.editItem')} title={t('catalogEditor.editItem')} className="p-2 rounded-lg border border-border-strong bg-control text-text-primary"><Pencil className="w-5 h-5" /></button>
+                <button type="button" onClick={() => { setDeleteTarget(selected); setSelected(null); }} aria-label={t('catalogEditor.deleteItem')} title={t('catalogEditor.deleteItem')} className="p-2 rounded-lg border border-status-danger-border bg-status-danger-bg text-status-danger"><Trash2 className="w-5 h-5" /></button>
                 {onAddToInventory && (
                   <button
                     type="button"

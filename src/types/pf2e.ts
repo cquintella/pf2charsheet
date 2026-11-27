@@ -203,9 +203,12 @@ export interface CharacterABCState {
   backgroundBoostChoice2: AttributeKey | null; // free boost
   // C: Class
   selectedClass: ClassItem | null;
+  psychicConsciousMind?: string;
   classKeyAttributeChoice: AttributeKey | null; // chosen key attribute
   // Level 1 Free Boosts (4 distinct attributes)
   level1FreeBoosts: AttributeKey[];
+  // House Rule: Extra attribute boosts at character creation
+  extraAttributeBoosts?: Partial<Record<AttributeKey, number>>;
   // Level 1 Free Trained Skills (additional + INT + overlap)
   selectedSkills?: SkillKey[];
 }
@@ -283,6 +286,7 @@ export interface CharacterProgressionSheet {
 }
 
 export interface EquipmentItem {
+  source?: string;
   traits?: string;
   rarity?: string;
   id: string;
@@ -301,6 +305,7 @@ export interface InventoryEntry {
   item: EquipmentItem;
   quantity: number;
   equipped: boolean;
+  containerId?: string;
 }
 
 export interface CharacterInventory {

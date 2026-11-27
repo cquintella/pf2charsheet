@@ -1,3 +1,4 @@
+import { ActionSymbol } from './ActionSymbol';
 import React from 'react';
 import { SpellItem } from '../types/pf2e';
 import { resolveSpellIcon, cleanSnippetText } from '../utils/formatters';
@@ -94,7 +95,7 @@ export const SpellCard: React.FC<SpellCardProps> = ({
     if (isCantrip) {
       return (
         <span 
-          className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-status-info-bg text-status-info border border-status-info-border text-[11px] font-bold"
+          className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-status-info-bg text-status-info border border-status-info-border text-xs font-bold"
           title={t('spell.typeTitle.cantrip')}
         >
           <Sparkles className="w-3 h-3 text-status-info" />
@@ -105,7 +106,7 @@ export const SpellCard: React.FC<SpellCardProps> = ({
     if (isFocus) {
       return (
         <span 
-          className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-status-danger-bg text-status-danger border border-status-danger-border text-[11px] font-bold"
+          className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-status-danger-bg text-status-danger border border-status-danger-border text-xs font-bold"
           title={t('spell.typeTitle.focus')}
         >
           <Flame className="w-3 h-3 text-status-danger" />
@@ -116,7 +117,7 @@ export const SpellCard: React.FC<SpellCardProps> = ({
     if (isRitual) {
       return (
         <span 
-          className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-status-purple-bg text-status-purple border border-status-purple-border text-[11px] font-bold"
+          className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-status-purple-bg text-status-purple border border-status-purple-border text-xs font-bold"
           title={t('spell.typeTitle.ritual')}
         >
           <Scroll className="w-3 h-3 text-status-purple" />
@@ -126,7 +127,7 @@ export const SpellCard: React.FC<SpellCardProps> = ({
     }
     return (
       <span 
-        className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-status-info-bg text-status-info border border-status-info-border text-[11px] font-bold"
+        className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-status-info-bg text-status-info border border-status-info-border text-xs font-bold"
         title={t('spell.typeTitle.slot')}
       >
         <BookOpen className="w-3 h-3 text-status-info" />
@@ -136,12 +137,12 @@ export const SpellCard: React.FC<SpellCardProps> = ({
   };
 
   const renderActionBadge = (time: string) => {
-    if (time === '1') return <span className="pf-action-icon text-[11px] px-1.5" title={t('action.timeTitle', { cost: t('action.1') })}>◆ 1</span>;
-    if (time === '2') return <span className="pf-action-icon text-[11px] px-1.5" title={t('action.timeTitle', { cost: t('action.2') })}>◆◆ 2</span>;
-    if (time === '3') return <span className="pf-action-icon text-[11px] px-1.5" title={t('action.timeTitle', { cost: t('action.3') })}>◆◆◆ 3</span>;
-    if (time === 'reaction') return <span className="pf-action-icon text-[11px] px-1.5 bg-status-danger-bg text-status-danger border-status-danger-border" title={t('action.timeTitle', { cost: t('action.reaction') })}>↺ {t('action.reaction')}</span>;
-    if (time === 'free') return <span className="pf-action-icon text-[11px] px-1.5 bg-status-success-bg text-status-success border-status-success-border" title={t('action.timeTitle', { cost: t('action.free') })}>◇ {t('action.freeShort')}</span>;
-    return <span className="pf-action-icon text-[11px] px-1.5">{time || '1'}</span>;
+    if (time === '1') return <span className="pf-action-icon text-xs px-1.5" title={t('action.timeTitle', { cost: t('action.1') })}><ActionSymbol kind="one" /> 1</span>;
+    if (time === '2') return <span className="pf-action-icon text-xs px-1.5" title={t('action.timeTitle', { cost: t('action.2') })}><ActionSymbol kind="two" /> 2</span>;
+    if (time === '3') return <span className="pf-action-icon text-xs px-1.5" title={t('action.timeTitle', { cost: t('action.3') })}><ActionSymbol kind="three" /> 3</span>;
+    if (time === 'reaction') return <span className="pf-action-icon text-xs px-1.5 bg-status-danger-bg text-status-danger border-status-danger-border" title={t('action.timeTitle', { cost: t('action.reaction') })}><ActionSymbol kind="reaction" /> {t('action.reaction')}</span>;
+    if (time === 'free') return <span className="pf-action-icon text-xs px-1.5 bg-status-success-bg text-status-success border-status-success-border" title={t('action.timeTitle', { cost: t('action.free') })}><ActionSymbol kind="free" /> {t('action.freeShort')}</span>;
+    return <span className="pf-action-icon text-xs px-1.5">{time || '1'}</span>;
   };
 
   const cleanSnippet = (html: string) => {
@@ -156,7 +157,7 @@ export const SpellCard: React.FC<SpellCardProps> = ({
     <div 
       {...clickableProps(onClick)}
       className={`group relative flex flex-col justify-between min-h-[260px] bg-surface hover:bg-elevated border-2 rounded-xl p-3.5 transition-all duration-200 cursor-pointer shadow-md hover:shadow-xl hover:-translate-y-0.5 overflow-hidden ${categoryTheme.borderClass} ${
-        isFavorite ? 'shadow-[0_0_14px_rgba(224,168,69,0.25)]' : ''
+        isFavorite ? 'shadow-[0_0_14px_rgb(var(--accent)/0.25)]' : ''
       }`}
     >
       <div className="flex-1 flex flex-col">
@@ -193,7 +194,7 @@ export const SpellCard: React.FC<SpellCardProps> = ({
               <Star 
                 className={`w-4 h-4 transition-all ${
                   isFavorite 
-                    ? 'text-accent-text fill-accent drop-shadow-[0_0_6px_rgba(224,168,69,0.6)]' 
+                    ? 'text-accent-text fill-accent drop-shadow-[0_0_6px_rgb(var(--accent)/0.6)]'
                     : 'text-text-muted hover:text-accent-text'
                 }`} 
               />
@@ -218,11 +219,11 @@ export const SpellCard: React.FC<SpellCardProps> = ({
               {spell.name}
             </h3>
             <div className="flex items-center space-x-1.5 mt-0.5">
-              <span className={`text-[11px] font-bold uppercase px-1.5 py-0.5 rounded border ${categoryTheme.badgeBg} ${categoryTheme.badgeText} border-transparent`}>
+              <span className={`text-xs font-bold uppercase px-1.5 py-0.5 rounded border ${categoryTheme.badgeBg} ${categoryTheme.badgeText} border-transparent`}>
                 {categoryTheme.label}
               </span>
               {spell.rarity && spell.rarity !== 'common' && (
-                <span className={`text-[11px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                <span className={`text-xs font-bold uppercase px-1.5 py-0.5 rounded ${
                   spell.rarity === 'uncommon' ? 'bg-status-warn-bg text-status-warn' :
                   spell.rarity === 'rare' ? 'bg-status-info-bg text-status-info' : 'bg-status-purple-bg text-status-purple'
                 }`}>
@@ -236,7 +237,7 @@ export const SpellCard: React.FC<SpellCardProps> = ({
         {/* Tradições e Traços */}
         <div className="flex flex-wrap gap-1 mt-2.5">
           {traditions.map((trad) => (
-            <span key={trad} className="text-[11px] font-medium uppercase px-1.5 py-0.5 rounded bg-elevated text-status-info border border-border-strong">
+            <span key={trad} className="text-xs font-medium uppercase px-1.5 py-0.5 rounded bg-elevated text-status-info border border-border-strong">
               {trad}
             </span>
           ))}
@@ -249,13 +250,13 @@ export const SpellCard: React.FC<SpellCardProps> = ({
                   onSelectTrait(t);
                 }
               }}
-              className="text-[11px] font-medium uppercase px-1.5 py-0.5 rounded bg-status-danger-bg text-status-danger border border-status-danger-border hover:bg-status-danger-bg"
+              className="text-xs font-medium uppercase px-1.5 py-0.5 rounded bg-status-danger-bg text-status-danger border border-status-danger-border hover:bg-status-danger-bg"
             >
               {t}
             </span>
           ))}
           {traits.length > 3 && (
-            <span className="text-[11px] text-text-secondary self-center">
+            <span className="text-xs text-text-secondary self-center">
               +{traits.length - 3}
             </span>
           )}
@@ -263,7 +264,7 @@ export const SpellCard: React.FC<SpellCardProps> = ({
 
         {/* Descrição Proporcional ao Formato MTG (63:88) */}
         <div className="flex-1 mt-2.5 p-2.5 rounded-lg bg-inset border border-border-subtle overflow-hidden">
-          <p className="text-[14px] text-text-secondary line-clamp-6 leading-relaxed tracking-[0.01em]">
+          <p className="text-base text-text-secondary line-clamp-6 leading-relaxed tracking-[0.01em]">
             {cleanSnippet(spell.description)}
           </p>
         </div>

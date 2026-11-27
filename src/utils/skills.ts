@@ -117,9 +117,13 @@ export function deriveDefaultLoreSkills(
   if (cls.custom && !names.some(n => n.toLowerCase() === cls.custom.toLowerCase())) {
     names.push(cls.custom);
   }
-  return names.map((name, idx) => ({
+  const entries: LoreSkillEntry[] = names.map((name, idx) => ({
     id: `lore_${idx}_${name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
     name,
     rank: 1,
   }));
+  if ((background?.slug || background?.name || '').toLowerCase() === 'scout') {
+    entries.push({ id: 'lore_scout_terrain', name: '', rank: 1 });
+  }
+  return entries;
 }

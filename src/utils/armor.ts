@@ -1,4 +1,4 @@
-import { ClassItem, InventoryEntry, ProficiencyRank } from '../types/pf2e';
+import { InventoryEntry, ProficiencyRank } from '../types/pf2e';
 import { getProficiencyBonus } from './formatters';
 import { MessageKey } from '../i18n/Translator';
 
@@ -10,7 +10,8 @@ export interface ArmorClassResult {
   warnings: MessageKey[];
 }
 
-export function calculateArmorClass(dexterity: number, level: number, characterClass: ClassItem | null, items: InventoryEntry[]): ArmorClassResult {
+/** `defenseRanks` holds the character's current rank per armor category (class base plus class features). */
+export function calculateArmorClass(dexterity: number, level: number, defenseRanks: Partial<Record<string, ProficiencyRank>>, items: InventoryEntry[]): ArmorClassResult {
   const armor = items.find(entry => entry.equipped && entry.item.item_type === 'armor');
   let category = 'unarmored';
   let armorBonus = 0;
@@ -28,13 +29,8 @@ export function calculateArmorClass(dexterity: number, level: number, characterC
     }
   }
   let rank = 0;
-  try {
-    const defenses = JSON.parse(characterClass?.defenses || '{}');
-    const value = defenses[category];
-    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 4) throw new Error('Missing proficiency');
-    rank = value;
-  } catch {
-    warnings.push('armor.missingProficiency');
-  }
+  const value = defenseRanks[category];
+  if (value === undefined) warnings.push('armor.missingProficiency');
+  else rank = value;
   return { value: 10 + dexterityBonus + armorBonus + getProficiencyBonus(rank as ProficiencyRank, level), armorName: armor?.item.name || null, warnings };
 }

@@ -89,6 +89,7 @@ export const FeatFiltersBar: React.FC<FeatFiltersBarProps> = ({
             type="text"
             value={filters.search}
             onChange={(e) => onChange({ search: e.target.value, offset: 0 })}
+            data-shortcut-search
             placeholder={t('featFilters.searchPlaceholder')}
             className="w-full bg-canvas border border-border-strong pl-10 pr-9 py-2 rounded-xl text-sm text-white placeholder-text-muted focus:outline-none focus:border-accent transition-colors"
           />
@@ -170,7 +171,7 @@ export const FeatFiltersBar: React.FC<FeatFiltersBarProps> = ({
           <button
             key={act.id}
             onClick={() => handleActionSelect(act)}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap ${
+            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
               isActionActive(act)
                 ? 'bg-control text-accent-text border border-accent/50'
                 : 'bg-canvas text-text-secondary hover:text-white border border-border-subtle'
@@ -186,7 +187,7 @@ export const FeatFiltersBar: React.FC<FeatFiltersBarProps> = ({
         <div className="pt-3 border-t border-border-strong grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
           {/* Level Filter */}
           <div>
-            <label className="text-[11px] font-bold text-text-secondary uppercase block mb-1">
+            <label className="text-xs font-bold text-text-secondary uppercase block mb-1">
               {t('featFilters.level')}
             </label>
             <select
@@ -205,7 +206,7 @@ export const FeatFiltersBar: React.FC<FeatFiltersBarProps> = ({
 
           {/* Rarity Filter */}
           <div>
-            <label className="text-[11px] font-bold text-text-secondary uppercase block mb-1">
+            <label className="text-xs font-bold text-text-secondary uppercase block mb-1">
               {t('filters.rarity')}
             </label>
             <select
@@ -223,7 +224,7 @@ export const FeatFiltersBar: React.FC<FeatFiltersBarProps> = ({
 
           {/* Trait Filter */}
           <div>
-            <label className="text-[11px] font-bold text-text-secondary uppercase block mb-1">
+            <label className="text-xs font-bold text-text-secondary uppercase block mb-1">
               {t('filters.trait')}
             </label>
             <div className="space-y-1">
@@ -255,10 +256,10 @@ export const FeatFiltersBar: React.FC<FeatFiltersBarProps> = ({
 
           {/* Reset & Summary Status */}
           <div className="flex flex-col justify-end">
-            <span className="text-[11px] text-text-secondary">
+            <span className="text-xs text-text-secondary">
               {t('featFilters.totalInCompendium')} <strong className="text-white">{metadata ? translator.formatNumber(metadata.totalFeats) : '—'}</strong>
             </span>
-            <span className="text-[11px] text-accent-text font-semibold">
+            <span className="text-xs text-accent-text font-semibold">
               {t('featFilters.found', { count: totalMatches })}
             </span>
           </div>

@@ -1,7 +1,8 @@
+import { ActionSymbol } from './ActionSymbol';
 import React, { useState, useEffect, useRef } from 'react';
-import { FeatItem, FeatFilters, FeatSelectionRecord, AttributeKey, SkillKey, ProficiencyRank } from '../types/pf2e';
+import { FeatItem, FeatFilters, FeatSelectionRecord, AttributeKey, SkillKey, ProficiencyRank, ClassItem } from '../types/pf2e';
 import { evaluatePrerequisites, RequirementResult } from '../utils/featRules';
-import { fetchFeats } from '../services/api';
+import { fetchClasses, fetchFeats } from '../services/api';
 import { resolvePf2eIcon, cleanDescriptionHtml } from '../utils/formatters';
 import { X, Search, Award, Check, Loader2 } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
@@ -17,9 +18,12 @@ interface FeatPickerModalProps {
   slotTitle: string;
   slotCategory: 'ancestry' | 'class' | 'skill' | 'general' | string;
   maxLevel: number;
+  characterLevel?: number;
   selectedFeatId?: string | null;
   ancestryTrait?: string | null;
   ancestryName?: string | null;
+  heritageName?: string;
+  characterClass?: ClassItem | null;
   extraAncestryTraits?: string[];
   onSelectFeat: (feat: FeatItem) => void;
   onClose: () => void;
@@ -34,9 +38,12 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
   slotTitle,
   slotCategory,
   maxLevel,
+  characterLevel,
   selectedFeatId,
   ancestryTrait,
   ancestryName,
+  heritageName,
+  characterClass,
   extraAncestryTraits = [],
   onSelectFeat,
   onClose
@@ -49,6 +56,8 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
     slotCategory === 'archetype' ? 'archetype' : 'all'
   );
   const [ancestryScope, setAncestryScope] = useState<string>('character');
+  const [classScope, setClassScope] = useState<string>(() => (characterClass?.slug || characterClass?.name || '').toLowerCase() || 'all');
+  const [classes, setClasses] = useState<ClassItem[]>([]);
   const [limit, setLimit] = useState(60);
   const [feats, setFeats] = useState<FeatItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -64,6 +73,12 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
   const modalRef = useRef<HTMLDivElement>(null);
   useModalFocus(modalRef, onClose, !dialogState);
 
+  useEffect(() => {
+    let active = true;
+    fetchClasses().then(items => { if (active) setClasses(items); }).catch(error => { if (active) console.error('Erro ao carregar classes:', error); });
+    return () => { active = false; };
+  }, []);
+
   // Load feats matching slot constraints
   useEffect(() => {
     let active = true;
@@ -77,6 +92,8 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
       ? traitFilter
       : (isAncestry && ancestryScope !== 'all')
       ? (ancestryScope === 'character' ? (ancestryTrait || 'all') : ancestryScope)
+      : category === 'class' && classScope !== 'all'
+      ? classScope
       : 'all';
 
     const filters: FeatFilters = {
@@ -109,13 +126,13 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
     return () => {
       active = false;
     };
-  }, [search, category, traitFilter, maxLevel, ancestryTrait, ancestryScope, slotCategory, limit]);
+  }, [search, category, traitFilter, maxLevel, ancestryTrait, ancestryScope, classScope, slotCategory, limit]);
 
   const selectFeat = (feat: FeatItem) => {
     let traits: string[] = [];
     try { traits = JSON.parse(feat.traits || '[]'); } catch { /* Dados ausentes. */ }
     if (slotCategory === 'archetype' && !traits.includes('archetype')) return;
-    const results = evaluatePrerequisites(feat.prerequisites, { attributes: ruleAttributes, skills: ruleSkills, feats: existingFeats, orderNames, incompleteOrders });
+    const results = evaluatePrerequisites(feat.prerequisites, { attributes: ruleAttributes, skills: ruleSkills, feats: existingFeats, orderNames, incompleteOrders, heritageName });
     const unmet = results.filter(result => result.status === 'unmet');
     if (unmet.length) {
       setDialogState({
@@ -161,18 +178,18 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
 
   const renderActionBadge = (feat: FeatItem) => {
     if (feat.action_type === 'passive') {
-      return <span className="text-[11px] text-text-secondary px-1.5 py-0.5 rounded bg-elevated border border-border-strong">{t('action.passive')}</span>;
+      return <span className="text-xs text-text-secondary px-1.5 py-0.5 rounded bg-elevated border border-border-strong">{t('action.passive')}</span>;
     }
     if (feat.action_type === 'reaction') {
-      return <span className="pf-action-icon text-[11px] px-1.5 bg-status-danger-bg text-status-danger border-status-danger-border">↺ {t('action.reaction')}</span>;
+      return <span className="pf-action-icon text-xs px-1.5 bg-status-danger-bg text-status-danger border-status-danger-border"><ActionSymbol kind="reaction" /> {t('action.reaction')}</span>;
     }
     if (feat.action_type === 'free') {
-      return <span className="pf-action-icon text-[11px] px-1.5 bg-status-success-bg text-status-success border-status-success-border">◇ {t('action.freeShort')}</span>;
+      return <span className="pf-action-icon text-xs px-1.5 bg-status-success-bg text-status-success border-status-success-border"><ActionSymbol kind="free" /> {t('action.freeShort')}</span>;
     }
-    if (feat.actions === '1') return <span className="pf-action-icon text-[11px] px-1.5">◆ 1</span>;
-    if (feat.actions === '2') return <span className="pf-action-icon text-[11px] px-1.5">◆◆ 2</span>;
-    if (feat.actions === '3') return <span className="pf-action-icon text-[11px] px-1.5">◆◆◆ 3</span>;
-    return <span className="text-[11px] text-text-secondary">{t('action.generic')}</span>;
+    if (feat.actions === '1') return <span className="pf-action-icon text-xs px-1.5"><ActionSymbol kind="one" /> 1</span>;
+    if (feat.actions === '2') return <span className="pf-action-icon text-xs px-1.5"><ActionSymbol kind="two" /> 2</span>;
+    if (feat.actions === '3') return <span className="pf-action-icon text-xs px-1.5"><ActionSymbol kind="three" /> 3</span>;
+    return <span className="text-xs text-text-secondary">{t('action.generic')}</span>;
   };
 
   return (
@@ -219,9 +236,9 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
         </div>
 
         {/* Filter Controls Bar */}
-        <div className="p-4 border-b border-border-strong bg-inset flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+        <div className="p-4 border-b border-border-strong bg-inset flex flex-col gap-3">
           {/* Search Input */}
-          <div className="relative flex-1">
+          <div className="relative min-w-0 w-full">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
             <input
               type="text"
@@ -241,7 +258,7 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
           </div>
 
           {/* Category Tabs */}
-          <div className="flex items-center space-x-1 overflow-x-auto text-xs">
+          <div className="flex flex-wrap items-center gap-1 text-xs">
             {slotCategory === 'archetype' ? (
               <div className="flex items-center gap-1.5 flex-wrap">
                 {(
@@ -347,6 +364,17 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
           </div>
         </div>
 
+        {slotCategory !== 'archetype' && category === 'class' && traitFilter === 'all' && (
+          <div className="px-4 py-3 border-b border-border-strong bg-inset flex flex-wrap items-center gap-3">
+            <label htmlFor="feat-picker-class" className="text-sm font-semibold text-text-secondary">{t('picker.classFilter')}</label>
+            <select id="feat-picker-class" value={classScope} onChange={event => { setClassScope(event.target.value); setLimit(60); }} className="rounded-lg border border-border-strong bg-elevated px-3 py-1.5 text-text-primary">
+              <option value="all">{t('picker.allClasses')}</option>
+              {characterClass && !classes.some(item => (item.slug || item.name).toLowerCase() === classScope) && classScope !== 'all' && <option value={classScope}>{characterClass.name}</option>}
+              {[...classes].sort((a, b) => a.name.localeCompare(b.name)).map(item => <option key={item.id} value={(item.slug || item.name).toLowerCase()}>{item.name}</option>)}
+            </select>
+          </div>
+        )}
+
         {/* Feat List Content (Master-Detail) */}
         <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
           <div className="lg:col-span-6 overflow-y-auto p-4 space-y-2 border-b lg:border-b-0 lg:border-r border-border-subtle">
@@ -367,7 +395,7 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
             feats.map((feat) => {
               let traits: string[] = [];
               try { traits = JSON.parse(feat.traits || '[]'); } catch { /* ignore */ }
-              const requirementResults = evaluatePrerequisites(feat.prerequisites, { attributes: ruleAttributes, skills: ruleSkills, feats: existingFeats, orderNames, incompleteOrders });
+              const requirementResults = evaluatePrerequisites(feat.prerequisites, { attributes: ruleAttributes, skills: ruleSkills, feats: existingFeats, orderNames, incompleteOrders, heritageName });
               const isSelected = selectedFeatId === feat.id;
               const isPreviewed = previewFeat?.id === feat.id;
               const hasUnmet = requirementResults.some(r => r.status === 'unmet');
@@ -397,12 +425,12 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
                         <span className="font-bold text-sm text-text-primary">{feat.name}</span>
-                        <span className="text-[11px] font-bold px-1.5 py-0.5 rounded bg-elevated text-accent-text border border-border-strong tabular-nums">
+                        <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-elevated text-accent-text border border-border-strong tabular-nums">
                           {t('common.levelShort', { level: feat.level })}
                         </span>
                         {renderActionBadge(feat)}
                         {hasUnmet && (
-                          <span className="text-[11px] font-bold px-1.5 py-0.5 rounded bg-status-danger-bg text-status-danger border border-status-danger-border">
+                          <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-status-danger-bg text-status-danger border border-status-danger-border">
                             ✗
                           </span>
                         )}
@@ -422,7 +450,7 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
             {previewFeat ? (() => {
               let traits: string[] = [];
               try { traits = JSON.parse(previewFeat.traits || '[]'); } catch { /* ignore */ }
-              const reqs = evaluatePrerequisites(previewFeat.prerequisites, { attributes: ruleAttributes, skills: ruleSkills, feats: existingFeats, orderNames, incompleteOrders });
+              const reqs = evaluatePrerequisites(previewFeat.prerequisites, { attributes: ruleAttributes, skills: ruleSkills, feats: existingFeats, orderNames, incompleteOrders, heritageName });
               const isSelected = selectedFeatId === previewFeat.id;
               return (
                 <div className="space-y-4">
@@ -430,15 +458,15 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
                     <div className="space-y-1.5">
                       <h3 className="text-lg font-bold text-text-primary">{previewFeat.name}</h3>
                       <div className="flex flex-wrap gap-1.5">
-                        <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-elevated text-accent-text border border-border-strong">
+                        <span className="text-xs font-bold px-2 py-0.5 rounded bg-elevated text-accent-text border border-border-strong">
                           {t('common.level', { level: previewFeat.level })}
                         </span>
-                        <span className="text-[11px] font-semibold uppercase px-2 py-0.5 rounded bg-status-info-bg text-status-info border border-status-info-border">
+                        <span className="text-xs font-semibold uppercase px-2 py-0.5 rounded bg-status-info-bg text-status-info border border-status-info-border">
                           {previewFeat.category}
                         </span>
                         {renderActionBadge(previewFeat)}
                         {traits.map(tr => (
-                          <span key={tr} className="text-[11px] uppercase px-2 py-0.5 rounded bg-elevated text-text-secondary border border-border-subtle">
+                          <span key={tr} className="text-xs uppercase px-2 py-0.5 rounded bg-elevated text-text-secondary border border-border-subtle">
                             {tr}
                           </span>
                         ))}
@@ -457,7 +485,7 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
 
                   {reqs.length > 0 && (
                     <div className="p-3 rounded-xl bg-surface border border-border-strong text-xs space-y-1.5">
-                      <span className="font-bold uppercase text-[11px] text-accent-text block">{t('feat.prerequisites')}</span>
+                      <span className="font-bold uppercase text-xs text-accent-text block">{t('feat.prerequisites')}</span>
                       <div className="flex flex-wrap gap-1.5">
                         {reqs.map((r, i) => (
                           <span
@@ -479,7 +507,7 @@ export const FeatPickerModal: React.FC<FeatPickerModalProps> = ({
 
                   <div
                     className="pf-prose text-sm text-text-secondary bg-surface p-4 rounded-xl border border-border-subtle"
-                    dangerouslySetInnerHTML={{ __html: cleanDescriptionHtml(previewFeat.description || '') }}
+                    dangerouslySetInnerHTML={{ __html: cleanDescriptionHtml(previewFeat.description || '', { actorLevel: characterLevel }) }}
                   />
                 </div>
               );

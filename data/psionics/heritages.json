@@ -1,0 +1,28 @@
+{
+  "source": "Psionics Second Edition (Alluria Publishing, 2026)",
+  "heritages": [
+    {
+      "name": "Crystal Elf", "slug": "crystal-elf", "ancestry": "Elf", "page": 34,
+      "description": "You gain the psionic trait and follow the Playing a Psionic Ancestry rules. You have an Ancestral Reserve of 1 Psychic Energy Point for the Reserve Rule and use Innate Manifestation for powers granted by heritage or ancestry feats. You gain Phrystal Affinity as a bonus ancestry feat.",
+      "feats": [
+        {"name":"Shard of Madness","level":1,"traits":["elf","psionic","emotion","mental"],"actionType":"reaction","description":"Trigger: A hostile creature damages you. You innately manifest Destiny Discord targeting the triggering creature, as the base talent but with a range of 15 feet instead of touch. At 13th level, apply the Omen augmentation without spending PEP."},
+        {"name":"Crystalline Eruption","level":5,"traits":["elf","psionic"],"actionType":"action","actions":"2","description":"Frequency: once per day. You innately manifest Crystal Strike with the Widen augmentation without spending PEP. It becomes a 5-foot burst dealing 3d6 piercing damage with a basic Reflex save."},
+        {"name":"Fractured Foresight","level":9,"traits":["elf","psionic","perceptive","fortune"],"actionType":"reaction","description":"Frequency: once per day. Trigger: You or an ally within 30 feet fails or critically fails a saving throw or attack roll. The target rerolls the triggering check and takes the better result."},
+        {"name":"Ectoplasmic Entombment","level":13,"traits":["elf","psionic","constructive","manipulate"],"actionType":"action","actions":"2","description":"Frequency: once per day. You innately manifest Ectoplasmic Shell without paying its PEP cost. At 17th level, apply Caustic Interior without spending additional PEP; a restrained target takes 1d6 acid damage per 2 Psionic Ranks at the start of each of its turns."},
+        {"name":"Shattered Singularity","level":17,"traits":["elf","psionic","mental","aura"],"actionType":"action","actions":"2","description":"Frequency: once per day. Trigger: A hostile creature or hazard you can see targets you with an attack roll, or you must save against a hostile effect. You innately manifest Mental Static with the Dazzling Static and Mental Fog augmentations without spending PEP."}
+      ]
+    },
+    {
+      "name":"Psi-Forged", "slug":"psi-forged", "ancestry":"Human", "page": 38,
+      "description":"You gain the psionic trait and follow the Playing a Psionic Ancestry rules. You have an Ancestral Reserve of 1 Psychic Energy Point for the Reserve Rule and use Innate Manifestation for powers granted by heritage or ancestry feats. While you possess at least 1 PEP, you need not eat or drink and are immune to starvation and thirst.",
+      "feats": [
+        {"name":"Mental Bastion","level":1,"traits":["human","psionic","mental"],"actionType":"reaction","description":"Frequency: once per day. Trigger: You take damage from a hostile creature or hazard. You gain resistance to the triggering damage equal to 2 + half your level."},
+        {"name":"Psionic Restoration","level":5,"traits":["human","psionic","mental","concentrate"],"actionType":"action","actions":"1","description":"Frequency: once per day. You manifest the Cellular Adjustment psionic talent with the Metabolic Healing augmentation as an innate manifestation. The daily frequency pays the augmentation cost, so this manifestation costs no PEP."},
+        {"name":"Prescient Reflexes","level":9,"traits":["human","psionic","spatial","time","concentrate"],"actionType":"reaction","description":"Frequency: once per day. Trigger: An enemy within 30 feet begins a Move or Manipulate action, Cast a Spell, or Manifest a Power. You manifest the Anticipatory Action advanced power as an innate manifestation without spending PEP; the daily frequency covers its base cost."},
+        {"name":"Blastback","level":13,"traits":["human","psionic","mental","force"],"actionType":"reaction","description":"Frequency: once per day. Trigger: A hostile creature within 30 feet critically succeeds against you with a melee or ranged Strike. The creature takes 1d6 force damage per Psionic Rank with a basic Fortitude save against your class DC or Psionic DC, whichever is higher; on a critical failure it is also knocked prone. The book also says the reaction can be used again after 10 minutes; these frequency statements conflict."},
+        {"name":"Immortal Ascendance","level":17,"traits":["human","psionic","mental"],"description":"You cease aging and gain a +2 status bonus to Fortitude saves against death effects, diseases, and poisons. Once per day, if a hostile creature's damage would reduce you to 0 HP, you automatically stabilize and remain at 1 HP instead."}
+      ]
+    }
+  ],
+  "phrystalAffinity": {"name":"Phrystal Affinity","description":"Prerequisite: a Psychic Energy Point pool. You gain a phrystal as described in chapter 3. During daily preparations, choose its two daily abilities and one Personality Fragment. If destroyed, you can manifest a replacement during your next daily preparations. It is active while you have at least 1 PEP and inert at 0 PEP."}
+}

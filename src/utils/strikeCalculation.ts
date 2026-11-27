@@ -1,4 +1,4 @@
-import { CharacterStrike, ClassItem, EquipmentItem, ProficiencyRank } from '../types/pf2e';
+import { CharacterStrike, EquipmentItem, ProficiencyRank } from '../types/pf2e';
 
 export interface WeaponStrikeData {
   dice: string;
@@ -11,7 +11,8 @@ export interface WeaponStrikeData {
   proficiency: ProficiencyRank | null;
 }
 
-export function calculateWeaponStrike(item: EquipmentItem, kind: CharacterStrike['kind'], strength: number, characterClass: ClassItem | null): WeaponStrikeData | null {
+/** `attackRanks` holds the character's current rank per weapon category (class base plus class features). */
+export function calculateWeaponStrike(item: EquipmentItem, kind: CharacterStrike['kind'], strength: number, attackRanks: Partial<Record<string, ProficiencyRank>>): WeaponStrikeData | null {
   try {
     const system = JSON.parse(item.system_json);
     const baseTraits: string[] = Array.isArray(system.traits?.value) ? system.traits.value.filter((t: unknown): t is string => typeof t === 'string') : [];
@@ -35,12 +36,7 @@ export function calculateWeaponStrike(item: EquipmentItem, kind: CharacterStrike
     const thrown = traits.some(t => t === 'thrown' || t.startsWith('thrown-'));
     const propulsive = traits.includes('propulsive');
     const strengthDamage = kind === 'melee' || thrown ? strength : propulsive ? (strength > 0 ? Math.floor(strength / 2) : strength) : 0;
-    let proficiency: ProficiencyRank | null = null;
-    try {
-      const attacks = JSON.parse(characterClass?.attacks || '{}');
-      const rank = attacks[system.category];
-      if (Number.isInteger(rank) && rank >= 0 && rank <= 4) proficiency = rank as ProficiencyRank;
-    } catch { /* Proficiência não disponível para esta classe. */ }
+    const proficiency: ProficiencyRank | null = typeof system.category === 'string' ? attackRanks[system.category] ?? null : null;
     return { dice: `${damage.dice + striking}${damage.die}`, damageType: baseType, damageTypes, itemBonus, traits, rangeIncrement, strengthDamage, proficiency };
   } catch { return null; }
 }

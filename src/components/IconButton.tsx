@@ -45,7 +45,7 @@ export const IconButton: React.FC<IconButtonProps> = ({
       >
         {icon}
         {badge !== undefined && (
-          <span className="ml-1 text-[11px] font-bold tabular-nums leading-none">
+          <span className="ml-1 text-xs font-bold tabular-nums leading-none">
             {badge}
           </span>
         )}

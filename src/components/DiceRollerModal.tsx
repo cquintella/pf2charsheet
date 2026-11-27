@@ -6,10 +6,14 @@ import { parseAndRollFormula } from '../utils/diceRoller';
 
 interface DiceRollerModalProps {
   onClose: () => void;
+  initialFormula?: string;
+  initialLabel?: string;
+  autoRoll?: boolean;
 }
 
 interface RollEntry {
   id: number;
+  label?: string;
   formula: string;
   total: number;
   breakdown: string;
@@ -18,16 +22,27 @@ interface RollEntry {
 const QUICK_DICE = ['1d4', '1d6', '1d8', '1d10', '1d12', '1d20', '1d100'] as const;
 
 /** Modal dialog for rolling arbitrary dice formulas and inspecting roll results. */
-export const DiceRollerModal: React.FC<DiceRollerModalProps> = ({ onClose }) => {
+export const DiceRollerModal: React.FC<DiceRollerModalProps> = ({
+  onClose,
+  initialFormula = '1d20',
+  initialLabel,
+  autoRoll = false,
+}) => {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalFocus(dialogRef, onClose);
 
-  const [formula, setFormula] = useState('1d20');
+  const [formula, setFormula] = useState(initialFormula);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [history, setHistory] = useState<RollEntry[]>([]);
+  const [history, setHistory] = useState<RollEntry[]>(() => {
+    if (!autoRoll) return [];
+    const res = parseAndRollFormula(initialFormula);
+    return res.ok
+      ? [{ id: Date.now() + Math.random(), label: initialLabel, formula: res.formula, total: res.total, breakdown: res.breakdown }]
+      : [];
+  });
 
-  const handleRoll = (expr: string = formula) => {
+  const handleRoll = (expr: string = formula, label?: string) => {
     const res = parseAndRollFormula(expr);
     if (!res.ok) {
       setErrorMsg(t('dice.invalidFormula'));
@@ -35,12 +50,12 @@ export const DiceRollerModal: React.FC<DiceRollerModalProps> = ({ onClose }) => 
     }
     setErrorMsg(null);
     setHistory(prev => [
-      { id: Date.now() + Math.random(), formula: res.formula, total: res.total, breakdown: res.breakdown },
+      { id: Date.now() + Math.random(), label, formula: res.formula, total: res.total, breakdown: res.breakdown },
       ...prev.slice(0, 29),
     ]);
   };
 
-  const resultsText = history.map(entry => `${entry.formula} -> ${entry.breakdown}`).join('\n');
+  const resultsText = history.map(entry => `${entry.label ? `${entry.label}: ` : ''}${entry.formula} -> ${entry.breakdown}`).join('\n');
 
   return (
     <div
@@ -133,7 +148,7 @@ export const DiceRollerModal: React.FC<DiceRollerModalProps> = ({ onClose }) => 
               <button
                 type="button"
                 onClick={() => setHistory([])}
-                className="flex items-center gap-1 text-[11px] font-semibold text-text-secondary hover:text-status-danger transition-colors"
+                className="flex items-center gap-1 text-xs font-semibold text-text-secondary hover:text-status-danger transition-colors"
               >
                 <Trash2 className="w-3 h-3" />
                 <span>{t('dice.clear')}</span>

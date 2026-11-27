@@ -56,6 +56,24 @@ export async function fetchSpellById(id: string): Promise<SpellItem> {
   return res.json();
 }
 
+export interface CatalogEntryInput {
+  name: string; level: number; rarity: string; traits: string[]; description: string; source: string; systemJson: string;
+  itemType?: string; price?: string; bulk?: string; category?: string; traditions?: string[];
+  time?: string; range?: string; target?: string; area?: string; duration?: string; defense?: string;
+}
+
+export async function saveCatalogEntry(type: 'spell' | 'equipment', data: CatalogEntryInput, id?: string): Promise<{ id: string }> {
+  const path = type === 'spell' ? 'spells' : 'equipment';
+  const res = await fetch(`/api/${path}${id ? `/${encodeURIComponent(id)}` : ''}`, { method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  if (!res.ok) throw new Error('Failed to save entry');
+  return res.json();
+}
+
+export async function deleteCatalogEntry(type: 'spell' | 'equipment', id: string): Promise<void> {
+  const res = await fetch(`/api/${type === 'spell' ? 'spells' : 'equipment'}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete entry');
+}
+
 export async function fetchSpellIcons(): Promise<SpellIconOption[]> {
   const res = await fetch('/api/icons/spells');
   if (!res.ok) throw new Error('Falha ao listar ícones de magias');
@@ -113,6 +131,61 @@ export async function deleteSpellbook(id: string): Promise<{ success: boolean }>
 }
 
 // Feats (Talentos) APIs
+export async function fetchSources(): Promise<string[]> {
+  const res = await fetch('/api/sources');
+  if (!res.ok) throw new Error('Failed to load sources');
+  return res.json();
+}
+
+export type SourceEdition = '' | '1e' | '2e' | '2r';
+export interface SourceRecord { name: string; edition: SourceEdition }
+export async function fetchSourceRecords(): Promise<SourceRecord[]> {
+  const res = await fetch('/api/sources?details=1');
+  if (!res.ok) throw new Error('Failed to load sources');
+  return res.json();
+}
+
+export async function createSource(name: string, edition: SourceEdition): Promise<void> {
+  const res = await fetch('/api/sources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, edition }) });
+  if (!res.ok) throw new Error('Failed to create source');
+}
+
+export async function changeSource(previousName: string, name: string, edition: SourceEdition): Promise<void> {
+  const res = await fetch('/api/sources', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ previousName, name, edition }) });
+  if (!res.ok) throw new Error('Failed to update source');
+}
+
+export async function deleteSource(previousName: string): Promise<void> {
+  const res = await fetch('/api/sources', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ previousName }) });
+  if (!res.ok) throw new Error('Failed to delete source');
+}
+
+export interface FeatInput {
+  name: string;
+  category: string;
+  level: number;
+  rarity: string;
+  action_type: string;
+  actions: string;
+  traits: string[];
+  prerequisites: string[];
+  description: string;
+  source: string;
+}
+
+export async function saveFeat(data: FeatInput, id?: string): Promise<{ id: string }> {
+  const res = await fetch(id ? `/api/feats/${encodeURIComponent(id)}` : '/api/feats', {
+    method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to save feat');
+  return res.json();
+}
+
+export async function deleteFeat(id: string): Promise<void> {
+  const res = await fetch(`/api/feats/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete feat');
+}
+
 export async function fetchFeatMetadata(): Promise<FeatMetadata> {
   const res = await fetch('/api/metadata/feats');
   if (!res.ok) throw new Error('Falha ao obter metadados de talentos');
@@ -211,7 +284,14 @@ export async function saveCharacter(data: any): Promise<{ success: boolean; id: 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  if (!res.ok) throw new Error('Falha ao salvar personagem');
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const errBody = await res.json() as { error?: string };
+      if (errBody?.error) detail = errBody.error;
+    } catch { /* ignore */ }
+    throw new Error(detail ? `Falha ao salvar personagem: ${detail}` : 'Falha ao salvar personagem');
+  }
   return res.json();
 }
 
@@ -231,5 +311,41 @@ export async function fetchEquipment(search: string, type: string, offset: numbe
   if (options?.ids) params.set('ids', options.ids.join(','));
   const res = await fetch(`/api/equipment?${params}`);
   if (!res.ok) throw new Error('Falha ao buscar equipamentos');
+  return res.json();
+}
+
+export interface PortraitDbEntry {
+  path: string;
+  species: string;
+  sex: string;
+  className: string;
+}
+
+export interface PortraitPluginResponse {
+  available: boolean;
+  id: string;
+  label: string;
+  portraits: PortraitDbEntry[];
+}
+
+export async function fetchPortraitPlugin(): Promise<PortraitPluginResponse> {
+  const res = await fetch('/api/portraitdb/plugin');
+  if (!res.ok) return { available: false, id: 'portraitdb', label: 'portraitdb', portraits: [] };
+  return res.json();
+}
+
+export async function fetchCustomPortraits(): Promise<PortraitDbEntry[]> {
+  const res = await fetch('/api/portraitdb');
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function addCustomPortrait(data: { dataUrl: string; species: string; sex: string }): Promise<{ success: boolean; item: PortraitDbEntry }> {
+  const res = await fetch('/api/portraitdb', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to add portrait to portraitdb');
   return res.json();
 }

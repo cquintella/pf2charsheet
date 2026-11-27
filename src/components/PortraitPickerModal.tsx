@@ -1,15 +1,21 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { BUILT_IN_PORTRAITS, PORTRAIT_SEXES, PortraitGallery, type PortraitSex } from '@portraitdb';
-import { ArrowLeft, Check, Crop, Image as ImageIcon, RotateCcw, Search, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Check, Crop, Database, Image as ImageIcon, RotateCcw, Search, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
 import { useModalFocus } from '../utils/useModalFocus';
 import {
   cropPortraitToSquare,
+  type CustomPortraitEntry,
+  getLocalCustomPortraits,
   getPortraitCropMetrics,
   getSelectedPortraitDb,
+  PORTRAIT_SEXES,
+  PortraitGallery,
+  type PortraitSex,
   readFileAsDataUrl,
   resolvePortraitSrc,
+  saveLocalCustomPortrait,
 } from '../utils/portrait';
+import { addCustomPortrait, fetchPortraitPlugin } from '../services/api';
 import { IconButton } from './IconButton';
 
 interface PortraitPickerModalProps {
@@ -23,6 +29,7 @@ const PAGE_SIZE = 60;
 const CROP_VIEWPORT_SIZE = 256;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 3;
+const NEW_OPTION_VALUE = '__new__';
 
 export const PortraitPickerModal: React.FC<PortraitPickerModalProps> = ({
   currentPortrait,
@@ -37,30 +44,69 @@ export const PortraitPickerModal: React.FC<PortraitPickerModalProps> = ({
   useModalFocus(modalRef, onClose);
 
   const portraitDb = getSelectedPortraitDb();
-  const gallery = useMemo(
-    () => new PortraitGallery(portraitDb === 'portraitdb' ? BUILT_IN_PORTRAITS : []),
-    [portraitDb]
+  const [pluginPortraits, setPluginPortraits] = useState<CustomPortraitEntry[]>(() =>
+    portraitDb === 'portraitdb' ? getLocalCustomPortraits() : []
   );
+
+  useEffect(() => {
+    if (portraitDb !== 'portraitdb') return;
+    let active = true;
+    fetchPortraitPlugin()
+      .then((plugin) => {
+        if (!active) return;
+        const localItems = getLocalCustomPortraits();
+        const mergedMap = new Map<string, CustomPortraitEntry>();
+        for (const item of [...plugin.portraits, ...localItems]) {
+          mergedMap.set(item.path, item);
+        }
+        setPluginPortraits(Array.from(mergedMap.values()));
+      })
+      .catch(() => { /* fallback to local custom portraits */ });
+    return () => { active = false; };
+  }, [portraitDb]);
+
+  const gallery = useMemo(
+    () => new PortraitGallery(portraitDb === 'portraitdb' ? pluginPortraits : []),
+    [portraitDb, pluginPortraits]
+  );
+  const availableSexes = useMemo(() => {
+    const set = new Set<string>(PORTRAIT_SEXES);
+    for (const item of pluginPortraits) {
+      if (item.sex) set.add(item.sex);
+    }
+    return Array.from(set);
+  }, [pluginPortraits]);
+
   const [species, setSpecies] = useState<string>(() => gallery.defaultSpeciesFor(characterAncestry));
-  const [sex, setSex] = useState<PortraitSex | ''>('');
+  const [sex, setSex] = useState<string>('');
   const [search, setSearch] = useState('');
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [isNewUpload, setIsNewUpload] = useState(false);
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [applying, setApplying] = useState(false);
 
+  const [pendingDbPortrait, setPendingDbPortrait] = useState<string | null>(null);
+  const [saveSpecies, setSaveSpecies] = useState<string>('');
+  const [customSpeciesInput, setCustomSpeciesInput] = useState('');
+  const [saveSex, setSaveSex] = useState<string>(PORTRAIT_SEXES[0]);
+  const [customSexInput, setCustomSexInput] = useState('');
+  const [savingToDb, setSavingToDb] = useState(false);
+
   const filtered = useMemo(
-    () => gallery.matching({ species, sex, search }),
+    () => gallery.matching({ species, sex: sex as PortraitSex | '', search }),
     [gallery, species, sex, search]
   );
   const visible = useMemo(() => filtered.slice(0, limit), [filtered, limit]);
 
-  const openCropper = (src: string) => {
+  const openCropper = (src: string, fromUpload = false) => {
     setUploadError(null);
+    setPendingDbPortrait(null);
+    setIsNewUpload(fromUpload);
     setNaturalSize(null);
     setZoom(1);
     setPan({ x: 0, y: 0 });
@@ -136,7 +182,7 @@ export const PortraitPickerModal: React.FC<PortraitPickerModalProps> = ({
     setUploadError(null);
     try {
       const dataUrl = await readFileAsDataUrl(file);
-      openCropper(dataUrl);
+      openCropper(dataUrl, true);
     } catch {
       setUploadError(t('portrait.uploadError'));
     }
@@ -155,11 +201,47 @@ export const PortraitPickerModal: React.FC<PortraitPickerModalProps> = ({
         cropMetrics?.panY ?? pan.y
       );
       onSelect(cropped);
-      onClose();
+      if (portraitDb === 'portraitdb' && isNewUpload) {
+        const defaultSp = gallery.defaultSpeciesFor(characterAncestry) || gallery.species[0] || NEW_OPTION_VALUE;
+        setSaveSpecies(defaultSp);
+        setCustomSpeciesInput('');
+        setSaveSex(availableSexes[0] || NEW_OPTION_VALUE);
+        setCustomSexInput('');
+        setCropSrc(null);
+        setPendingDbPortrait(cropped);
+      } else {
+        onClose();
+      }
     } catch {
       setUploadError(t('portrait.uploadError'));
     } finally {
       setApplying(false);
+    }
+  };
+
+  const handleAddToPortraitDb = async () => {
+    if (!pendingDbPortrait || savingToDb) return;
+    const finalSpecies = (saveSpecies === NEW_OPTION_VALUE ? customSpeciesInput : saveSpecies).trim();
+    const finalSex = (saveSex === NEW_OPTION_VALUE ? customSexInput : saveSex).trim();
+    if (!finalSpecies || !finalSex) return;
+
+    setSavingToDb(true);
+    setUploadError(null);
+    try {
+      let savedEntry: CustomPortraitEntry;
+      try {
+        const res = await addCustomPortrait({ dataUrl: pendingDbPortrait, species: finalSpecies, sex: finalSex });
+        savedEntry = res.item;
+      } catch {
+        savedEntry = { path: pendingDbPortrait, species: finalSpecies, sex: finalSex, className: '' };
+      }
+      saveLocalCustomPortrait(savedEntry);
+      setPluginPortraits((prev) => [...prev.filter((item) => item.path !== savedEntry.path), savedEntry]);
+      onClose();
+    } catch {
+      setUploadError(t('portrait.addToDbError'));
+    } finally {
+      setSavingToDb(false);
     }
   };
 
@@ -226,7 +308,7 @@ export const PortraitPickerModal: React.FC<PortraitPickerModalProps> = ({
           </div>
         </div>
 
-        {!cropSrc && (
+        {!cropSrc && !pendingDbPortrait && (
           <div className="p-3 border-b border-border-subtle bg-elevated flex flex-wrap items-center gap-2">
           <div className="relative flex-1 min-w-[180px]">
             <Search className="w-3.5 h-3.5 text-text-muted absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -263,20 +345,22 @@ export const PortraitPickerModal: React.FC<PortraitPickerModalProps> = ({
             aria-label={t('portrait.allSexes')}
             value={sex}
             onChange={(e) => {
-              setSex(e.target.value as PortraitSex | '');
+              setSex(e.target.value);
               setLimit(PAGE_SIZE);
             }}
             className="bg-inset border border-border-strong rounded-lg px-2.5 py-1.5 text-xs text-text-primary"
           >
             <option value="">{t('portrait.allSexes')}</option>
-            {PORTRAIT_SEXES.map((s) => (
+            {availableSexes.map((s) => (
               <option key={s} value={s}>
-                {t(`portrait.sex.${s}` as 'portrait.sex.Female' | 'portrait.sex.Male' | 'portrait.sex.Other')}
+                {PORTRAIT_SEXES.includes(s as PortraitSex)
+                  ? t(`portrait.sex.${s}` as 'portrait.sex.Female' | 'portrait.sex.Male' | 'portrait.sex.Other')
+                  : s}
               </option>
             ))}
           </select>
 
-          <span className="text-[11px] text-text-muted font-medium ml-auto">
+          <span className="text-xs text-text-muted font-medium ml-auto">
             {t('portrait.count', { shown: visible.length, total: filtered.length })}
           </span>
         </div>
@@ -288,7 +372,104 @@ export const PortraitPickerModal: React.FC<PortraitPickerModalProps> = ({
           </div>
         )}
 
-        {cropSrc ? (
+        {pendingDbPortrait ? (
+          <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-center gap-5 bg-surface">
+            <img
+              src={pendingDbPortrait}
+              alt={t('portrait.addToDbTitle')}
+              className="w-32 h-32 rounded-2xl object-cover border-2 border-accent shadow-lg"
+            />
+            <div className="text-center space-y-1 max-w-md">
+              <h3 className="text-base font-bold text-text-primary flex items-center justify-center gap-2">
+                <Database className="w-4 h-4 text-accent-text" />
+                <span>{t('portrait.addToDbTitle')}</span>
+              </h3>
+              <p className="text-xs text-text-secondary">{t('portrait.addToDbMessage')}</p>
+            </div>
+
+            <div className="w-full max-w-sm space-y-3">
+              <div className="space-y-1">
+                <label htmlFor="portrait-db-species" className="block text-xs font-bold uppercase text-text-secondary">
+                  {t('portrait.speciesLabel')}
+                </label>
+                <select
+                  id="portrait-db-species"
+                  value={saveSpecies}
+                  onChange={(e) => setSaveSpecies(e.target.value)}
+                  className="w-full bg-inset border border-border-strong rounded-lg px-3 py-2 text-xs text-text-primary"
+                >
+                  {gallery.species.map((sp) => (
+                    <option key={sp} value={sp}>{sp}</option>
+                  ))}
+                  <option value={NEW_OPTION_VALUE}>{t('portrait.addNewOption')}</option>
+                </select>
+                {saveSpecies === NEW_OPTION_VALUE && (
+                  <input
+                    type="text"
+                    value={customSpeciesInput}
+                    onChange={(e) => setCustomSpeciesInput(e.target.value)}
+                    placeholder={t('portrait.newSpeciesPlaceholder')}
+                    className="w-full mt-1.5 bg-inset border border-border-strong rounded-lg px-3 py-2 text-xs text-text-primary placeholder:text-text-muted"
+                    autoFocus
+                  />
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label htmlFor="portrait-db-sex" className="block text-xs font-bold uppercase text-text-secondary">
+                  {t('portrait.genderLabel')}
+                </label>
+                <select
+                  id="portrait-db-sex"
+                  value={saveSex}
+                  onChange={(e) => setSaveSex(e.target.value)}
+                  className="w-full bg-inset border border-border-strong rounded-lg px-3 py-2 text-xs text-text-primary"
+                >
+                  {availableSexes.map((s) => (
+                    <option key={s} value={s}>
+                      {PORTRAIT_SEXES.includes(s as PortraitSex)
+                        ? t(`portrait.sex.${s}` as 'portrait.sex.Female' | 'portrait.sex.Male' | 'portrait.sex.Other')
+                        : s}
+                    </option>
+                  ))}
+                  <option value={NEW_OPTION_VALUE}>{t('portrait.addNewOption')}</option>
+                </select>
+                {saveSex === NEW_OPTION_VALUE && (
+                  <input
+                    type="text"
+                    value={customSexInput}
+                    onChange={(e) => setCustomSexInput(e.target.value)}
+                    placeholder={t('portrait.newGenderPlaceholder')}
+                    className="w-full mt-1.5 bg-inset border border-border-strong rounded-lg px-3 py-2 text-xs text-text-primary placeholder:text-text-muted"
+                  />
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg bg-elevated hover:bg-control border border-border-strong text-xs font-semibold text-text-primary transition-colors"
+              >
+                {t('portrait.skipAddToDb')}
+              </button>
+              <button
+                type="button"
+                disabled={
+                  savingToDb ||
+                  !(saveSpecies === NEW_OPTION_VALUE ? customSpeciesInput.trim() : saveSpecies.trim()) ||
+                  !(saveSex === NEW_OPTION_VALUE ? customSexInput.trim() : saveSex.trim())
+                }
+                onClick={handleAddToPortraitDb}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent hover:bg-accent-hover text-accent-contrast text-xs font-bold shadow-md disabled:opacity-50 transition-opacity"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>{t('portrait.confirmAddToDb')}</span>
+              </button>
+            </div>
+          </div>
+        ) : cropSrc ? (
           <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-center gap-5 bg-surface">
             <div className="text-center space-y-1">
               <h3 className="text-sm font-bold text-text-primary">{t('portrait.adjust')}</h3>
@@ -433,7 +614,7 @@ export const PortraitPickerModal: React.FC<PortraitPickerModalProps> = ({
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                       />
                       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-2 py-1">
-                        <span className="text-[11px] font-semibold text-white block truncate">
+                        <span className="text-xs font-semibold text-white block truncate">
                           {item.className ? `${item.species} · ${item.className}` : item.species}
                         </span>
                       </div>

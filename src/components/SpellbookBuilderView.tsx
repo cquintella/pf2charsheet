@@ -17,7 +17,6 @@ import {
   X, 
   Sparkles, 
   Check, 
-  FolderPlus, 
   Download, 
   ChevronRight,
   Printer
@@ -28,6 +27,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { IconButton } from './IconButton';
 import { useI18n } from '../i18n/I18nContext';
 import { SheetGuard } from './LevelProgressionView';
+import { useModalFocus, clickableProps } from '../utils/useModalFocus';
 
 interface SpellbookBuilderViewProps {
   metadata: SpellMetadata | null;
@@ -48,13 +48,20 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
   const [showTarotPrint, setShowTarotPrint] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
   const [saveStatus, setSaveStatus] = useState<string>('');
+  const [errorStatus, setErrorStatus] = useState<string>('');
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState<boolean>(false);
+  const [creating, setCreating] = useState(false);
+  const [pendingBookAction, setPendingBookAction] = useState<(() => void) | null>(null);
+  const pendingDialogRef = useRef<HTMLDivElement>(null);
+  const loadSequence = useRef(0);
+  useModalFocus(pendingDialogRef, () => { if (!saving) setPendingBookAction(null); }, Boolean(pendingBookAction));
 
   // Search & Filter state for Left panel (66%)
   const [search, setSearch] = useState<string>('');
   const [selectedRank, setSelectedRank] = useState<string>('all');
   const [selectedTradition, setSelectedTradition] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [addingAll, setAddingAll] = useState(false);
   const [catalogSpells, setCatalogSpells] = useState<SpellItem[]>([]);
   const [catalogTotal, setCatalogTotal] = useState<number>(0);
   const [catalogOffset, setCatalogOffset] = useState<number>(0);
@@ -62,33 +69,35 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
 
   // Selected spells in active spellbook (Map of ID -> SpellItem)
   const [selectedSpellsMap, setSelectedSpellsMap] = useState<Record<string, SpellItem>>({});
+  const [unavailableSpellIds, setUnavailableSpellIds] = useState<string[]>([]);
+  const [invalidSpellList, setInvalidSpellList] = useState(false);
   const savedSnapshot = useRef<string | null>(null);
   const needsBaseline = useRef(true);
 
   // Load list of spellbooks from SQLite on mount
-  const loadSpellbooksList = async () => {
-    try {
-      const list = await fetchSpellbooks();
-      setSpellbooks(list);
-      if (list.length > 0 && !activeSpellbook) {
-        loadSpellbookDetails(list[0].id);
-      } else if (list.length === 0) {
-        handleCreateNewSpellbook();
-      }
-    } catch (err) {
-      console.error('Erro ao carregar lista de grimórios:', err);
-    }
+  const loadSpellbooksList = async (): Promise<Spellbook[]> => {
+    const list = await fetchSpellbooks();
+    setSpellbooks(list);
+    return list;
   };
 
   useEffect(() => {
-    loadSpellbooksList();
+    void loadSpellbooksList().then(list => {
+      if (list.length > 0) void loadSpellbookDetails(list[0].id);
+    }).catch(err => {
+      console.error('Erro ao carregar lista de grimórios:', err);
+      setErrorStatus(t('spellbook.loadError'));
+    });
   }, []);
 
   // Load single spellbook with hydrated spells
   const loadSpellbookDetails = async (id: string) => {
+    const request = ++loadSequence.current;
+    setErrorStatus('');
     setLoadingBook(true);
     try {
       const sb = await fetchSpellbookById(id);
+      if (request !== loadSequence.current) return;
       needsBaseline.current = true;
       setActiveSpellbook(sb);
       const map: Record<string, SpellItem> = {};
@@ -99,15 +108,23 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
           }
         }
       }
+      try {
+        const storedIds: unknown = JSON.parse(sb.spells_json || '[]');
+        if (!Array.isArray(storedIds) || storedIds.some(id => typeof id !== 'string')) throw new Error('Invalid spell list');
+        setUnavailableSpellIds(storedIds.filter((spellId: string) => !map[spellId]));
+        setInvalidSpellList(false);
+      } catch {
+        setUnavailableSpellIds([]);
+        setInvalidSpellList(true);
+      }
       setSelectedSpellsMap(map);
       // Auto-filter by tradition if specified in spellbook
-      if (sb.tradition && sb.tradition !== 'all') {
-        setSelectedTradition(sb.tradition);
-      }
+      setSelectedTradition(sb.tradition || 'all');
     } catch (err) {
       console.error('Erro ao carregar detalhes do grimório:', err);
+      if (request === loadSequence.current) setErrorStatus(t('spellbook.loadError'));
     } finally {
-      setLoadingBook(false);
+      if (request === loadSequence.current) setLoadingBook(false);
     }
   };
 
@@ -159,6 +176,9 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
 
   // Create new spellbook
   const handleCreateNewSpellbook = async () => {
+    if (creating) return;
+    setCreating(true);
+    setErrorStatus('');
     const newBook: Partial<Spellbook> = {
       name: t('spellbook.defaultName', { n: spellbooks.length + 1 }),
       tradition: 'arcane',
@@ -172,6 +192,9 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
       await loadSpellbookDetails(res.id);
     } catch (err) {
       console.error('Erro ao criar novo grimório:', err);
+      setErrorStatus(t('spellbook.createError'));
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -181,17 +204,24 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
     tradition: activeSpellbook?.tradition || '',
     caster_class: activeSpellbook?.caster_class || '',
     description: activeSpellbook?.description || '',
-    spellIds: Object.keys(selectedSpellsMap).sort(),
+    spellIds: [...Object.keys(selectedSpellsMap), ...unavailableSpellIds].sort(),
   });
   const currentSpellbookSnapshot = spellbookSnapshot();
+  const isDirty = Boolean(activeSpellbook && savedSnapshot.current !== null && savedSnapshot.current !== currentSpellbookSnapshot);
+  const requestBookAction = (action: () => void) => {
+    if (isDirty) setPendingBookAction(() => action);
+    else action();
+  };
 
   // Save current active spellbook to SQLite
   const handleSaveSpellbook = async (): Promise<boolean> => {
     if (!activeSpellbook) return true;
+    if (invalidSpellList) { setErrorStatus(t('spellbook.invalidSpellList')); return false; }
     const savedState = spellbookSnapshot();
+    setErrorStatus('');
     setSaving(true);
     try {
-      const spellIds = Object.keys(selectedSpellsMap);
+      const spellIds = [...Object.keys(selectedSpellsMap), ...unavailableSpellIds];
       await updateSpellbook(activeSpellbook.id, {
         name: activeSpellbook.name,
         tradition: activeSpellbook.tradition,
@@ -202,11 +232,11 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
       savedSnapshot.current = savedState;
       setSaveStatus(t('spellbook.savedOk'));
       setTimeout(() => setSaveStatus(''), 3000);
-      loadSpellbooksList();
+      void loadSpellbooksList().catch(err => console.error('Erro ao atualizar grimórios:', err));
       return true;
     } catch (err) {
       console.error('Erro ao salvar:', err);
-      setSaveStatus(t('spellbook.saveError'));
+      setErrorStatus(t('spellbook.saveError'));
       return false;
     } finally {
       setSaving(false);
@@ -214,7 +244,8 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
   };
 
   useLayoutEffect(() => {
-    if (loadingBook || !activeSpellbook) return;
+    if (loadingBook) return;
+    if (!activeSpellbook) { onGuardChange?.(null); return; }
     if (needsBaseline.current) {
       savedSnapshot.current = currentSpellbookSnapshot;
       needsBaseline.current = false;
@@ -232,17 +263,23 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
     if (!activeSpellbook) return;
     try {
       await deleteSpellbook(activeSpellbook.id);
+      loadSequence.current++;
       setActiveSpellbook(null);
       setSelectedSpellsMap({});
+      setUnavailableSpellIds([]);
+      setInvalidSpellList(false);
       setConfirmDeleteOpen(false);
-      loadSpellbooksList();
+      const remaining = await loadSpellbooksList();
+      if (remaining.length > 0) await loadSpellbookDetails(remaining[0].id);
     } catch (err) {
       console.error('Erro ao excluir:', err);
+      setErrorStatus(t('spellbook.deleteError'));
     }
   };
 
   // Toggle adding/removing spell
   const toggleSpellInBook = (spell: SpellItem) => {
+    if (!activeSpellbook || loadingBook) return;
     setSelectedSpellsMap((prev) => {
       const next = { ...prev };
       if (next[spell.id]) {
@@ -252,6 +289,32 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
       }
       return next;
     });
+  };
+
+  const addAllSpells = async () => {
+    if (!activeSpellbook || addingAll || loadingBook) return;
+    const request = loadSequence.current;
+    setAddingAll(true);
+    try {
+      const all: SpellItem[] = [];
+      let total = 0;
+      do {
+        const result = await fetchSpells({ search, rank: selectedRank, tradition: selectedTradition, category: selectedCategory, defense: 'all', actions: 'all', trait: 'all', rarity: 'all', limit: 60, offset: all.length });
+        total = result.total;
+        if (!result.spells.length) throw new Error('Incomplete spell catalog');
+        all.push(...result.spells);
+      } while (all.length < total);
+      if (request === loadSequence.current) setSelectedSpellsMap(previous => {
+        const next = { ...previous };
+        all.forEach(spell => { next[spell.id] = spell; });
+        return next;
+      });
+    } catch (error) {
+      console.error(error);
+      setErrorStatus(t('spellbook.addAllError'));
+    } finally {
+      setAddingAll(false);
+    }
   };
 
   // Export current spellbook to JSON
@@ -298,7 +361,20 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
 
   return (
     <div className="space-y-4">
+      {pendingBookAction && <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 p-4" role="dialog" aria-modal="true" aria-labelledby="spellbook-unsaved-title">
+        <div ref={pendingDialogRef} className="w-full max-w-md rounded-2xl border border-border-strong bg-surface p-5 space-y-4 shadow-2xl">
+          <h2 id="spellbook-unsaved-title" className="text-lg font-bold text-text-primary">{t('app.unsavedTitle')}</h2>
+          <p className="text-sm text-text-primary">{t('spellbook.unsavedBody')}</p>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button type="button" disabled={saving} onClick={() => setPendingBookAction(null)} className="px-3 py-2 rounded-lg bg-control text-sm">{t('common.cancel')}</button>
+            <button type="button" disabled={saving} onClick={() => { const action = pendingBookAction; setPendingBookAction(null); action(); }} className="px-3 py-2 rounded-lg bg-status-danger-bg text-sm text-status-danger">{t('app.dontSave')}</button>
+            <button type="button" disabled={saving} onClick={async () => { const action = pendingBookAction; if (await handleSaveSpellbook()) { setPendingBookAction(null); action(); } }} className="px-3 py-2 rounded-lg bg-accent text-accent-contrast text-sm">{saving ? t('common.saving') : t('common.save')}</button>
+          </div>
+        </div>
+      </div>}
       {showTarotPrint && <TarotPrintView spells={Object.values(groupedSelectedSpells).flat()} onClose={() => setShowTarotPrint(false)} />}
+      {errorStatus && <div role="alert" className="rounded-lg border border-status-danger-border bg-status-danger-bg px-4 py-2 text-status-danger">{errorStatus}</div>}
+      {(unavailableSpellIds.length > 0 || invalidSpellList) && <div role="alert" className="rounded-lg border border-status-warn-border bg-status-warn-bg px-4 py-2 text-status-warn">{invalidSpellList ? t('spellbook.invalidSpellList') : t('spellbook.unavailableSpells', { count: unavailableSpellIds.length })}</div>}
       {confirmDeleteOpen && activeSpellbook && (
         <ConfirmDialog
           title={t('spellbook.delete')}
@@ -310,32 +386,40 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
         />
       )}
       {/* Spellbook Header & Management Bar */}
-      <div className="bg-surface border border-border-strong rounded-xl p-4 shadow-lg flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+      <div className="bg-surface border border-border-strong rounded-xl p-4 shadow-lg flex flex-col items-stretch gap-4">
         {/* Spellbook Selector & Info */}
-        <div className="flex flex-1 flex-wrap items-center gap-3">
-          <div className="flex items-center space-x-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <div className="flex min-w-0 items-center space-x-2">
             <BookOpen className="w-5 h-5 text-accent-text" />
             <select
               value={activeSpellbook?.id || ''}
-              onChange={(e) => loadSpellbookDetails(e.target.value)}
-              className="py-1.5 px-3 bg-elevated border border-border-strong rounded-lg text-sm font-semibold text-white focus:border-accent outline-none"
+              aria-label={t('spellbook.chooseBook')}
+              disabled={creating || loadingBook}
+              onChange={(e) => {
+                const id = e.target.value;
+                if (id === '__new_spellbook__') requestBookAction(() => { void handleCreateNewSpellbook(); });
+                else if (id && id !== activeSpellbook?.id) requestBookAction(() => { void loadSpellbookDetails(id); });
+              }}
+              className="min-w-0 max-w-full py-1.5 px-3 bg-elevated border border-border-strong rounded-lg text-sm font-semibold text-white focus:border-accent outline-none"
             >
+              {!activeSpellbook && <option value="">{loadingBook ? t('common.loading') : t('spellbook.noBook')}</option>}
               {spellbooks.map((sb) => (
                 <option key={sb.id} value={sb.id}>
                   {sb.name} ({sb.tradition})
                 </option>
               ))}
+              <option value="__new_spellbook__">{t('spellbook.newBook')}</option>
             </select>
           </div>
 
           {activeSpellbook && (
-            <div className="flex items-center space-x-2 flex-1 min-w-[200px]">
+            <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
               <input
                 type="text"
                 value={activeSpellbook.name}
                 onChange={(e) => setActiveSpellbook({ ...activeSpellbook, name: e.target.value })}
                 placeholder={t('spellbook.namePlaceholder')}
-                className="py-1.5 px-3 bg-elevated border border-border-strong focus:border-accent rounded-lg text-sm text-white font-medium outline-none flex-1"
+                className="py-1.5 px-3 bg-elevated border border-border-strong focus:border-accent rounded-lg text-sm text-white font-medium outline-none flex-1 min-w-[160px]"
               />
               <select
                 value={activeSpellbook.caster_class || 'Wizard'}
@@ -415,11 +499,6 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
         {/* Action Buttons */}
         <div className="flex items-center gap-2 flex-wrap">
           <IconButton
-            onClick={handleCreateNewSpellbook}
-            label={t('spellbook.new')}
-            icon={<FolderPlus className="w-4 h-4 text-accent-text" />}
-          />
-          <IconButton
             onClick={handleSaveSpellbook}
             disabled={saving || !activeSpellbook}
             variant="accent"
@@ -450,6 +529,7 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
               {saveStatus}
             </span>
           )}
+          {isDirty && <span className="text-sm text-status-warn font-semibold">{t('sheet.unsavedBadge')}</span>}
         </div>
       </div>
 
@@ -477,6 +557,7 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                data-shortcut-search
                 placeholder={t('spellbook.filterPlaceholder')}
                 className="w-full pl-9 pr-9 py-2 bg-elevated border border-border-strong focus:border-accent rounded-lg text-sm text-white placeholder-text-muted outline-none"
               />
@@ -544,6 +625,10 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
             </div>
           </div>
 
+          <button type="button" onClick={() => { void addAllSpells(); }} disabled={!activeSpellbook || loadingBook || creating || loadingCatalog || addingAll || catalogTotal === 0} className="px-3 py-2 rounded-lg bg-control text-accent-text border border-border-strong disabled:opacity-50">
+            {addingAll ? t('common.loading') : t('spellbook.addAll')}
+          </button>
+
           {/* Catalog Spells List */}
           <div className="max-h-[620px] overflow-y-auto space-y-2 pr-1">
             {loadingCatalog ? (
@@ -565,12 +650,12 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
                     key={spell.id}
                     className={`flex items-center justify-between p-2.5 rounded-lg border transition-all ${
                       isSelected
-                        ? 'bg-status-success-bg border-status-success-border'
+                        ? 'bg-accent/10 border-accent/50'
                         : 'bg-elevated hover:bg-elevated border-border-strong'
                     }`}
                   >
-                    <div 
-                      onClick={() => onSelectSpellForDetail(spell)}
+                    <div
+                      {...clickableProps(() => onSelectSpellForDetail(spell))}
                       className="flex items-center space-x-3 flex-1 min-w-0 cursor-pointer"
                     >
                       <div className="w-8 h-8 rounded bg-elevated border border-border-strong p-0.5 flex-shrink-0 flex items-center justify-center overflow-hidden">
@@ -592,7 +677,7 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
                             {isCantrip ? t('spell.badge.cantrip') : t('spell.rankOrdinal', { n: spell.rank })}
                           </span>
                         </div>
-                        <div className="text-[11px] text-text-secondary truncate">
+                        <div className="text-xs text-text-secondary truncate">
                           {spell.time && `◆ ${spell.time} • `}
                           {spell.range ? `${spell.range} • ` : ''}
                           {spell.defense ? `${t('spellFilters.save')}: ${spell.defense}` : spell.duration || t('spell.instant')}
@@ -603,24 +688,16 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
                     {/* Action Button: Add or Remove */}
                     <button
                       onClick={() => toggleSpellInBook(spell)}
-                      className={`ml-3 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1 transition-all ${
+                      aria-label={t(isSelected ? 'spellbook.removeNamed' : 'spellbook.addNamed', { name: spell.name })}
+                      disabled={!activeSpellbook || loadingBook || creating}
+                      className={`ml-3 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                         isSelected
-                          ? 'bg-status-success-border hover:bg-red-700 text-white'
+                          ? 'bg-accent hover:bg-accent-hover text-accent-contrast'
                           : 'bg-control hover:bg-accent hover:text-black text-accent-text border border-border-strong'
                       }`}
                       title={isSelected ? t('spellbook.removeFromBook') : t('spellbook.addToBook')}
                     >
-                      {isSelected ? (
-                        <>
-                          <Check className="w-3.5 h-3.5" />
-                          <span>{t('spellbook.added')}</span>
-                        </>
-                      ) : (
-                        <>
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>{t('spellbook.add')}</span>
-                        </>
-                      )}
+                      {isSelected ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
                     </button>
                   </div>
                 );
@@ -654,7 +731,7 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
                 {t('spellbook.inscribed', { count: totalSelectedSpells })}
               </p>
             </div>
-            <span className="px-2.5 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-accent/20 text-accent-text border border-accent/40">
+            <span className="px-2.5 py-0.5 rounded text-xs font-bold uppercase tracking-wider bg-accent/20 text-accent-text border border-accent/40">
               {traditionLabel(activeSpellbook?.tradition || 'arcane')}
             </span>
           </div>
@@ -664,10 +741,11 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
             {totalSelectedSpells === 0 ? (
               <div className="py-16 text-center space-y-2">
                 <BookOpen className="w-10 h-10 text-text-secondary mx-auto opacity-40" />
-                <h3 className="text-sm font-semibold text-white">{t('spellbook.empty')}</h3>
+                <h3 className="text-sm font-semibold text-white">{activeSpellbook ? t('spellbook.empty') : t('spellbook.noBook')}</h3>
                 <p className="text-xs text-text-secondary max-w-[220px] mx-auto">
-                  {t('spellbook.emptyHint')}
+                  {activeSpellbook ? t('spellbook.emptyHint') : t('spellbook.createHint')}
                 </p>
+                {!activeSpellbook && <button type="button" disabled={creating || loadingBook} onClick={() => { void handleCreateNewSpellbook(); }} className="px-4 py-2 rounded-lg bg-accent text-accent-contrast font-semibold disabled:opacity-50">{creating ? t('common.loading') : t('spellbook.new')}</button>}
               </div>
             ) : (
               [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((rankNum) => {
@@ -681,7 +759,7 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
                     {/* Rank Group Header */}
                     <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-accent-text border-b border-border-strong pb-1">
                       <span>{rankTitle}</span>
-                      <span className="text-[11px] text-text-secondary font-normal">
+                      <span className="text-xs text-text-secondary font-normal">
                         {t('app.spellCount', { count: spellsInRank.length })}
                       </span>
                     </div>
@@ -694,8 +772,8 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
                             key={spell.id}
                             className="group flex items-center justify-between py-1.5 px-2 rounded-lg bg-elevated hover:bg-elevated border border-border-strong text-xs transition-colors"
                           >
-                            <div 
-                              onClick={() => onSelectSpellForDetail(spell)}
+                            <div
+                              {...clickableProps(() => onSelectSpellForDetail(spell))}
                               className="flex items-center space-x-2 min-w-0 flex-1 cursor-pointer"
                               title={t('spellbook.clickForDetails')}
                             >
@@ -704,7 +782,7 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
                                 {spell.name}
                               </span>
                               {spell.time && (
-                                <span className="text-[11px] text-text-secondary flex-shrink-0">
+                                <span className="text-xs text-text-secondary flex-shrink-0">
                                   ({t('spellbook.actionCost', { time: spell.time })})
                                 </span>
                               )}
@@ -712,6 +790,7 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
 
                             <button
                               onClick={() => toggleSpellInBook(spell)}
+                              aria-label={t('spellbook.removeNamed', { name: spell.name })}
                               className="p-1 rounded text-text-secondary hover:text-status-danger hover:bg-status-danger-bg transition-colors"
                               title={t('spellbook.removeFromBook')}
                             >
@@ -724,18 +803,6 @@ export const SpellbookBuilderView: React.FC<SpellbookBuilderViewProps> = ({
                   </div>
                 );
               })
-            )}
-            {catalogSpells.length < catalogTotal && (
-              <div className="pt-2 flex justify-center">
-                <button
-                  type="button"
-                  disabled={loadingCatalog}
-                  onClick={() => setCatalogOffset(prev => prev + 60)}
-                  className="px-4 py-2 rounded-lg bg-elevated hover:bg-control text-xs font-semibold text-text-primary border border-border-strong disabled:opacity-50"
-                >
-                  {loadingCatalog ? t('common.loading') : t('app.loadMoreSpells', { shown: catalogSpells.length, total: catalogTotal })}
-                </button>
-              </div>
             )}
           </div>
 

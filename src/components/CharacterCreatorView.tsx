@@ -38,7 +38,9 @@ import { SheetGuard } from './LevelProgressionView';
 import { useI18n } from '../i18n/I18nContext';
 import { ConfirmDialog } from './ConfirmDialog';
 import { PortraitPickerModal } from './PortraitPickerModal';
+import { PsychicMindSelector } from './PsychicMindSelector';
 import { getCharacterPortrait, resolvePortraitSrc } from '../utils/portrait';
+import { PSYCHIC_MIND_ATTRIBUTES } from '../utils/psychic';
 import { MessageKey } from '../i18n/Translator';
 import { attributeName, attributeShort, skillName, proficiencyWithBonus, signed, toProficiencyRank } from '../i18n/gameTerms';
 import { 
@@ -91,16 +93,19 @@ const INITIAL_CHARACTER_STATE: CharacterABCState = {
   selectedClass: null,
   classKeyAttributeChoice: null,
   level1FreeBoosts: [],
+  extraAttributeBoosts: {},
   selectedSkills: []
 };
 
 interface CharacterCreatorViewProps {
+  allowExtraAttributes?: boolean;
   onNavigateToLevels?: () => void;
   onCharacterSaved?: (savedId: string) => void;
   onGuardChange?: (guard: SheetGuard | null) => void;
 }
 
 export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
+  allowExtraAttributes = false,
   onNavigateToLevels,
   onCharacterSaved,
   onGuardChange
@@ -217,12 +222,6 @@ export const CharacterCreatorView: React.FC<CharacterCreatorViewProps> = ({
     }
   }, [charState.background]);
 
-  const PSYCHIC_MIND_ATTRIBUTES: Record<string, AttributeKey> = {
-  'gathered lore': 'int',
-  'precise discipline': 'int',
-  'emotional acceptance': 'cha',
-  'wandering reverie': 'cha',
-};
 
 function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grantedFeatId: string | null } {
   if (!feat?.system_json) return { skill: null, grantedFeatId: null };
@@ -368,14 +367,11 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
       const arr = JSON.parse(cls.key_ability || '[]');
       if (arr.length > 0) initialKey = arr[0];
     } catch (e) {}
-    if (!initialKey && (cls.slug || cls.name || '').toLowerCase() === 'psychic') {
-      initialKey = 'int';
-    }
-
     setSubclassName('');
     setCharState(prev => ({
       ...prev,
       selectedClass: cls,
+      psychicConsciousMind: '',
       classKeyAttributeChoice: initialKey
     }));
   };
@@ -390,6 +386,18 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
         if (current.length >= 4) return prev;
         return { ...prev, level1FreeBoosts: [...current, attr] };
       }
+    });
+  };
+
+  // House Rule: Extra attribute boosts at character creation
+  const adjustExtraAttributeBoost = (attr: AttributeKey, delta: number) => {
+    setCharState(prev => {
+      const current = prev.extraAttributeBoosts?.[attr] || 0;
+      const next = Math.max(0, Math.min(10, current + delta));
+      const updated = { ...prev.extraAttributeBoosts };
+      if (next === 0) delete updated[attr];
+      else updated[attr] = next;
+      return { ...prev, extraAttributeBoosts: updated };
     });
   };
 
@@ -462,6 +470,14 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
       scores[attr].sources.push({ labelKey: 'creator.source.freeBoosts', type: 'boost' });
     });
 
+    // House Rule: Extra attribute boosts
+    ALL_ATTRIBUTES.forEach(attr => {
+      const extra = charState.extraAttributeBoosts?.[attr] || 0;
+      for (let i = 0; i < extra; i++) {
+        scores[attr].sources.push({ labelKey: 'creator.source.extraAttributes', type: 'boost' });
+      }
+    });
+
     // Compute final modifier and score
     ALL_ATTRIBUTES.forEach(attr => {
       let mod = 0;
@@ -528,7 +544,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
     return {
       ...base,
       autoTrained,
-      freeBudget: base.freeBudget + skilledBonus,
+      freeBudget: base.freeBudget + skilledBonus + (subclassEffects.skill && base.autoTrained.includes(subclassEffects.skill) ? 1 : 0),
     };
   }, [charState.background, charState.selectedClass, charState.heritage, calculatedAttributes.int.mod, subclassEffects.skill]);
 
@@ -563,6 +579,10 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
     pendingChoices.push({ step: 3, message: t('creator.pendingClass') });
   } else if (!charState.classKeyAttributeChoice) {
     pendingChoices.push({ step: 3, message: t('creator.pendingClassBoost') });
+  }
+  if ((charState.selectedClass?.slug || charState.selectedClass?.name || '').toLowerCase() === 'psychic') {
+    if (!selectedSubclass) pendingChoices.push({ step: 3, message: t('psychic.pendingSubconscious') });
+    if (!charState.psychicConsciousMind) pendingChoices.push({ step: 3, message: t('psychic.pending') });
   }
   if (charState.level1FreeBoosts.length < 4) {
     pendingChoices.push({ step: 4, message: t('creator.pendingFreeBoosts', { selected: charState.level1FreeBoosts.length }) });
@@ -729,7 +749,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
     if (!file) return;
     try {
       const text = await file.text();
-      const imported = parseImportedCharacterJson(text);
+      const imported = await parseImportedCharacterJson(text);
       const res = await saveCharacter(imported);
       if (res.success) {
         const updatedList = await fetchCharacters();
@@ -856,7 +876,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                 key={attr} 
                 className="bg-canvas border border-border-strong rounded-xl p-2.5 flex flex-col items-center justify-center text-center hover:border-text-muted transition-all"
               >
-                <span className="text-[11px] font-bold tracking-wider uppercase text-text-secondary">
+                <span className="text-xs font-bold tracking-wider uppercase text-text-secondary">
                   {attributeShort(t, attr)}
                 </span>
                 <span 
@@ -865,7 +885,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                 >
                   {sign}
                 </span>
-                <span className="text-[11px] text-text-muted font-mono">
+                <span className="text-xs text-text-muted font-mono">
                   {t('creator.score', { score: data.score })}
                 </span>
               </div>
@@ -970,7 +990,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
               </select>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[580px] overflow-y-auto pr-1">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[580px] overflow-y-auto rounded-2xl border border-border-strong bg-inset p-3">
               {filteredAncestries.map(ancestry => {
                 const isSelected = charState.ancestry?.id === ancestry.id;
 
@@ -1027,7 +1047,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                       <h4 className="text-xs font-bold text-white uppercase tracking-wider">
                         {t('creator.boostRule')}
                       </h4>
-                      <p className="text-[11px] text-text-secondary">
+                      <p className="text-xs text-text-secondary">
                         {t('creator.boostRuleHint')}
                       </p>
                     </div>
@@ -1056,7 +1076,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                       <div className="grid grid-cols-2 gap-2">
                         {['alt0', 'alt1'].map((slotKey, idx) => (
                           <div key={slotKey} className="space-y-1">
-                            <label className="text-[11px] text-text-secondary">{t('creator.freeBoostN', { n: idx + 1 })}</label>
+                            <label className="text-xs text-text-secondary">{t('creator.freeBoostN', { n: idx + 1 })}</label>
                             <select
                               value={charState.ancestryBoostChoices[slotKey] || ''}
                               onChange={(e) => {
@@ -1104,7 +1124,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                               return (
                                 <div key={boost.slotKey} className="flex items-center justify-between text-xs bg-canvas px-3 py-1.5 rounded-lg border border-border-strong">
                                   <span className="text-white font-medium">{attributeName(t, attr)}</span>
-                                  <span className="px-2 py-0.5 rounded bg-status-success-bg text-status-success font-bold border border-status-success-border text-[11px]">
+                                  <span className="px-2 py-0.5 rounded bg-status-success-bg text-status-success font-bold border border-status-success-border text-xs">
                                     +1 {attributeShort(t, attr)} ({t('creator.fixed')})
                                   </span>
                                 </div>
@@ -1125,7 +1145,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
 
                             return (
                               <div key={boost.slotKey} className="space-y-1">
-                                <label className="text-[11px] text-text-secondary">
+                                <label className="text-xs text-text-secondary">
                                   {isFree ? t('creator.ancestryFreeBoost') : t('creator.boostChoice')}
                                 </label>
                                 <select
@@ -1165,7 +1185,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                               return (
                                 <div key={flaw.slotKey} className="flex items-center justify-between text-xs bg-canvas px-3 py-1.5 rounded-lg border border-red-950/60">
                                   <span className="text-white font-medium">{attributeName(t, attr)}</span>
-                                  <span className="px-2 py-0.5 rounded bg-status-danger-bg text-status-danger font-bold border border-status-danger-border text-[11px]">
+                                  <span className="px-2 py-0.5 rounded bg-status-danger-bg text-status-danger font-bold border border-status-danger-border text-xs">
                                     -1 {attributeShort(t, attr)}
                                   </span>
                                 </div>
@@ -1184,9 +1204,9 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                     <div>
                       <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
                         <span>{t('creator.voluntaryFlaw')}</span>
-                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-control text-accent-text">{t('creator.optional')}</span>
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-control text-accent-text">{t('creator.optional')}</span>
                       </h4>
-                      <p className="text-[11px] text-text-secondary">
+                      <p className="text-xs text-text-secondary">
                         {t('creator.voluntaryFlawHint')}
                       </p>
                     </div>
@@ -1209,7 +1229,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                   {charState.useVoluntaryFlaw && (
                     <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border-strong">
                       <div className="space-y-1">
-                        <label className="text-[11px] text-status-danger font-semibold">
+                        <label className="text-xs text-status-danger font-semibold">
                           {t('creator.decrease')}
                         </label>
                         <select
@@ -1234,7 +1254,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                       </div>
 
                       <div className="space-y-1">
-                        <label className="text-[11px] text-status-success font-semibold">
+                        <label className="text-xs text-status-success font-semibold">
                           {t('creator.increase')}
                         </label>
                         <select
@@ -1268,7 +1288,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                       {t('creator.heritage')}
                     </h4>
                     {charState.heritage && isVersatileHeritage(charState.heritage) && (
-                      <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-accent/20 text-accent-text border border-accent/40">
+                      <span className="text-xs font-bold uppercase px-2 py-0.5 rounded bg-accent/20 text-accent-text border border-accent/40">
                         {t('creator.versatileHeritage')}
                       </span>
                     )}
@@ -1289,14 +1309,14 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                     ))}
                   </select>
                   {charState.heritage && (
-                    <p className="text-[11px] text-text-secondary leading-relaxed max-h-20 overflow-y-auto">
+                    <p className="text-base text-text-secondary leading-relaxed max-h-20 overflow-y-auto">
                       {cleanSnippetText(charState.heritage.description)}
                     </p>
                   )}
                 </div>
 
                 {/* Description Preview */}
-                <div className="text-xs text-text-secondary bg-canvas p-3 rounded-xl border border-border-strong max-h-32 overflow-y-auto leading-relaxed">
+                <div className="text-base text-text-secondary bg-canvas p-3 rounded-xl border border-border-strong max-h-32 overflow-y-auto leading-relaxed">
                   <p>{cleanSnippetText(charState.ancestry.description)}</p>
                 </div>
 
@@ -1363,12 +1383,12 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                       <div className="flex items-center space-x-1 mt-1">
                         {parsedSkills.length > 0 ? (
                           parsedSkills.map(sk => (
-                            <span key={sk} className="text-[11px] bg-elevated text-status-info px-1.5 py-0.5 rounded border border-border-strong capitalize">
+                            <span key={sk} className="text-xs bg-elevated text-status-info px-1.5 py-0.5 rounded border border-border-strong capitalize">
                               {sk}
                             </span>
                           ))
                         ) : (
-                          <span className="text-[11px] text-text-muted">{t('creator.skillTbd')}</span>
+                          <span className="text-xs text-text-muted">{t('creator.skillTbd')}</span>
                         )}
                       </div>
                     </div>
@@ -1405,7 +1425,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
 
                   {/* Boost 1: Choice between the 2 specific attributes */}
                   <div className="space-y-1">
-                    <label className="text-[11px] text-text-secondary">
+                    <label className="text-xs text-text-secondary">
                       {t('creator.specificBoost')}
                     </label>
                     <select
@@ -1431,7 +1451,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
 
                   {/* Boost 2: Free boost among any of the 6 */}
                   <div className="space-y-1">
-                    <label className="text-[11px] text-text-secondary">
+                    <label className="text-xs text-text-secondary">
                       {t('creator.freeBoostAny')}
                     </label>
                     <select
@@ -1563,7 +1583,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                   <h4 className="text-xs font-bold text-white uppercase tracking-wider">
                     {t('creator.classKeyAttr')}
                   </h4>
-                  <p className="text-[11px] text-text-secondary">
+                  <p className="text-xs text-text-secondary">
                     {t('creator.classKeyAttrHint')}
                   </p>
 
@@ -1591,25 +1611,25 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                   </h4>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="bg-canvas p-2 rounded-lg border border-border-strong">
-                      <span className="text-text-secondary block text-[11px]">{t('sheet.fortitude')}:</span>
+                      <span className="text-text-secondary block text-xs">{t('sheet.fortitude')}:</span>
                       <span className="font-bold text-white">
                         {proficiencyWithBonus(t, toProficiencyRank(charState.selectedClass.fortitude))}
                       </span>
                     </div>
                     <div className="bg-canvas p-2 rounded-lg border border-border-strong">
-                      <span className="text-text-secondary block text-[11px]">{t('sheet.reflex')}:</span>
+                      <span className="text-text-secondary block text-xs">{t('sheet.reflex')}:</span>
                       <span className="font-bold text-white">
                         {proficiencyWithBonus(t, toProficiencyRank(charState.selectedClass.reflex))}
                       </span>
                     </div>
                     <div className="bg-canvas p-2 rounded-lg border border-border-strong">
-                      <span className="text-text-secondary block text-[11px]">{t('sheet.will')}:</span>
+                      <span className="text-text-secondary block text-xs">{t('sheet.will')}:</span>
                       <span className="font-bold text-white">
                         {proficiencyWithBonus(t, toProficiencyRank(charState.selectedClass.will))}
                       </span>
                     </div>
                     <div className="bg-canvas p-2 rounded-lg border border-border-strong">
-                      <span className="text-text-secondary block text-[11px]">{t('sheet.perception')}:</span>
+                      <span className="text-text-secondary block text-xs">{t('sheet.perception')}:</span>
                       <span className="font-bold text-white">
                         {proficiencyWithBonus(t, toProficiencyRank(charState.selectedClass.perception))}
                       </span>
@@ -1618,7 +1638,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                 </div>
 
                 {/* Subclass Selection (Druidic Order / Psychic Subconscious Mind) */}
-                {(isDruid || subclassOptions.length > 0) && (() => {
+                {(isDruid || (charState.selectedClass?.slug || charState.selectedClass?.name || '').toLowerCase() === 'psychic') && (() => {
                   const isPsychic = (charState.selectedClass?.slug || charState.selectedClass?.name || '').toLowerCase() === 'psychic';
                   return (
                     <div className="bg-elevated border border-border-strong rounded-xl p-3.5 space-y-2.5">
@@ -1647,7 +1667,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                           </option>
                         ))}
                       </select>
-                      {isDruid && subclassOptions.length === 0 && (subclassLoadError ? (
+                      {subclassOptions.length === 0 && (subclassLoadError ? (
                         <button type="button" className="text-xs text-status-warn underline" onClick={() => setSubclassLoadAttempt(attempt => attempt + 1)}>
                           {t('sheet.choiceLoadError')}
                         </button>
@@ -1655,6 +1675,10 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                     </div>
                   );
                 })()}
+
+                {(charState.selectedClass?.slug || charState.selectedClass?.name || '').toLowerCase() === 'psychic' && (
+                  <PsychicMindSelector value={charState.psychicConsciousMind || ''} onChange={psychicConsciousMind => setCharState(prev => ({ ...prev, psychicConsciousMind }))} level={editingId && loadedCharacter.current ? loadedCharacter.current.level : 1} />
+                )}
 
                 {/* Description Preview */}
                 <div className="text-sm text-text-secondary bg-canvas p-3 rounded-xl border border-border-strong max-h-48 overflow-y-auto leading-relaxed">
@@ -1748,6 +1772,43 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
               );
             })}
           </div>
+
+          {allowExtraAttributes && (
+            <div className="p-4 rounded-xl bg-inset border border-border-strong space-y-3">
+              <div>
+                <h4 className="text-sm font-bold text-accent-text">{t('creator.extraAttributesTitle')}</h4>
+                <p className="text-xs text-text-secondary">{t('creator.extraAttributesHint')}</p>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+                {ALL_ATTRIBUTES.map(attr => {
+                  const extra = charState.extraAttributeBoosts?.[attr] || 0;
+                  return (
+                    <div key={attr} className="bg-surface border border-border-subtle rounded-xl p-2.5 flex flex-col items-center gap-1.5">
+                      <span className="text-xs font-bold uppercase text-text-secondary">{attributeShort(t, attr)}</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={extra <= 0}
+                          onClick={() => adjustExtraAttributeBoost(attr, -1)}
+                          className="w-6 h-6 rounded bg-control hover:bg-control-hover disabled:opacity-40 text-white font-bold text-xs"
+                        >
+                          -
+                        </button>
+                        <span className="text-sm font-black text-white tabular-nums min-w-[24px] text-center">+{extra}</span>
+                        <button
+                          type="button"
+                          onClick={() => adjustExtraAttributeBoost(attr, 1)}
+                          className="w-6 h-6 rounded bg-control hover:bg-control-hover text-white font-bold text-xs"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-between pt-4 border-t border-border-strong">
             <button
@@ -1854,9 +1915,9 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                       <span className="text-xs font-bold truncate">{skillName(t, skill)}</span>
                     </div>
                     <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className="text-[11px] text-text-muted uppercase">{attributeShort(t, info.attribute)}</span>
+                      <span className="text-xs text-text-muted uppercase">{attributeShort(t, info.attribute)}</span>
                       {sourceLabel && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-success-bg text-status-success border border-status-success-border font-semibold">
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-status-success-bg text-status-success border border-status-success-border font-semibold">
                           {sourceLabel}
                         </span>
                       )}
@@ -1943,29 +2004,29 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                 {/* Core Stats Row */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-border-strong">
                   <div className="bg-canvas p-3 rounded-xl border border-border-strong text-center">
-                    <span className="text-[11px] text-text-secondary uppercase font-bold">{t('creator.hpLabel')}</span>
+                    <span className="text-xs text-text-secondary uppercase font-bold">{t('creator.hpLabel')}</span>
                     <span className="text-2xl font-black text-status-danger block mt-0.5">{derivedStats.maxHp}</span>
-                    <span className="text-[11px] text-text-muted">
+                    <span className="text-xs text-text-muted">
                       {charState.ancestry?.hp || 0} + {charState.selectedClass?.hp || 0} + {attributeShort(t, 'con')} ({signed(calculatedAttributes.con.mod)})
                     </span>
                   </div>
 
                   <div className="bg-canvas p-3 rounded-xl border border-border-strong text-center">
-                    <span className="text-[11px] text-text-secondary uppercase font-bold">{t('creator.acLabel')}</span>
+                    <span className="text-xs text-text-secondary uppercase font-bold">{t('creator.acLabel')}</span>
                     <span className="text-2xl font-black text-status-info block mt-0.5">{derivedStats.ac}</span>
-                    <span className="text-[11px] text-text-muted">{t('creator.acFormula', { dex: attributeShort(t, 'dex'), mod: signed(calculatedAttributes.dex.mod) })}</span>
+                    <span className="text-xs text-text-muted">{t('creator.acFormula', { dex: attributeShort(t, 'dex'), mod: signed(calculatedAttributes.dex.mod) })}</span>
                   </div>
 
                   <div className="bg-canvas p-3 rounded-xl border border-border-strong text-center">
-                    <span className="text-[11px] text-text-secondary uppercase font-bold">{t('sheet.perception')}</span>
+                    <span className="text-xs text-text-secondary uppercase font-bold">{t('sheet.perception')}</span>
                     <span className="text-2xl font-black text-status-success block mt-0.5">{signed(derivedStats.perception)}</span>
-                    <span className="text-[11px] text-text-muted">{attributeShort(t, 'wis')} ({signed(calculatedAttributes.wis.mod)}) + {t('creator.levelProf')}</span>
+                    <span className="text-xs text-text-muted">{attributeShort(t, 'wis')} ({signed(calculatedAttributes.wis.mod)}) + {t('creator.levelProf')}</span>
                   </div>
 
                   <div className="bg-canvas p-3 rounded-xl border border-border-strong text-center">
-                    <span className="text-[11px] text-text-secondary uppercase font-bold">{t('creator.speed')}</span>
+                    <span className="text-xs text-text-secondary uppercase font-bold">{t('creator.speed')}</span>
                     <span className="text-2xl font-black text-status-warn block mt-0.5">{t('common.feet', { value: derivedStats.speed })}</span>
-                    <span className="text-[11px] text-text-muted">{sizeLabel(charState.ancestry?.size || 'med')}</span>
+                    <span className="text-xs text-text-muted">{sizeLabel(charState.ancestry?.size || 'med')}</span>
                   </div>
                 </div>
               </div>
@@ -2014,7 +2075,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                                   {data.sources.map((src, i) => (
                                     <span
                                       key={i}
-                                      className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${
+                                      className={`px-2 py-0.5 rounded text-xs font-semibold border ${
                                         src.type === 'boost'
                                           ? 'bg-status-success-bg/80 text-status-success border-status-success-border'
                                           : 'bg-status-danger-bg/80 text-status-danger border-status-danger-border'
@@ -2046,21 +2107,21 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                   <div className="bg-canvas p-3 rounded-xl border border-border-strong">
                     <span className="text-xs font-bold text-text-secondary block">{t('sheet.fortitude')} ({attributeShort(t, 'con')})</span>
                     <span className="text-2xl font-black text-white mt-1 block">{signed(derivedStats.fortitude)}</span>
-                    <span className="text-[11px] text-text-muted">
+                    <span className="text-xs text-text-muted">
                       {attributeName(t, 'con')} ({signed(calculatedAttributes.con.mod)}) + {proficiencyWithBonus(t, toProficiencyRank(charState.selectedClass?.fortitude))}
                     </span>
                   </div>
                   <div className="bg-canvas p-3 rounded-xl border border-border-strong">
                     <span className="text-xs font-bold text-text-secondary block">{t('sheet.reflex')} ({attributeShort(t, 'dex')})</span>
                     <span className="text-2xl font-black text-white mt-1 block">{signed(derivedStats.reflex)}</span>
-                    <span className="text-[11px] text-text-muted">
+                    <span className="text-xs text-text-muted">
                       {attributeName(t, 'dex')} ({signed(calculatedAttributes.dex.mod)}) + {proficiencyWithBonus(t, toProficiencyRank(charState.selectedClass?.reflex))}
                     </span>
                   </div>
                   <div className="bg-canvas p-3 rounded-xl border border-border-strong">
                     <span className="text-xs font-bold text-text-secondary block">{t('sheet.will')} ({attributeShort(t, 'wis')})</span>
                     <span className="text-2xl font-black text-white mt-1 block">{signed(derivedStats.will)}</span>
-                    <span className="text-[11px] text-text-muted">
+                    <span className="text-xs text-text-muted">
                       {attributeName(t, 'wis')} ({signed(calculatedAttributes.wis.mod)}) + {proficiencyWithBonus(t, toProficiencyRank(charState.selectedClass?.will))}
                     </span>
                   </div>
@@ -2116,7 +2177,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                 <button
                   type="button"
                   onClick={() => importInputRef.current?.click()}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-elevated hover:bg-control border border-border-strong text-[11px] font-bold text-accent-text transition-colors"
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-elevated hover:bg-control border border-border-strong text-xs font-bold text-accent-text transition-colors"
                 >
                   <Upload className="w-3 h-3" />
                   <span>{t('sheet.importJson')}</span>
@@ -2133,7 +2194,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
               {savedCharacters.length === 0 ? (
                 <div className="text-center py-8 text-xs text-text-secondary space-y-1">
                   <p>{t('creator.noSavedCharacters')}</p>
-                  <p className="text-[11px] text-text-muted">
+                  <p className="text-xs text-text-muted">
                     {t('creator.noSavedCharactersHint')}
                   </p>
                 </div>
@@ -2159,7 +2220,7 @@ function parseOrderRules(feat: FeatItem | null): { skill: SkillKey | null; grant
                           <h4 className="font-bold text-white text-xs truncate group-hover:text-accent-text">
                             {char.name}
                           </h4>
-                          <p className="text-[11px] text-text-secondary mt-0.5 truncate">
+                          <p className="text-xs text-text-secondary mt-0.5 truncate">
                             {char.ancestry} • {char.class} • {t('common.levelShort', { level: char.level })}
                           </p>
                         </div>

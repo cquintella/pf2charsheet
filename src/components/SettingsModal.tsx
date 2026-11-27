@@ -6,10 +6,10 @@ import { useModalFocus } from '../utils/useModalFocus';
 import { PortraitDbSource } from '../utils/portrait';
 import { HpProgressionMode } from '../types/pf2e';
 
-export type ThemeName = 'current' | 'light' | 'dark';
+export type ThemeName = 'current' | 'light' | 'dark' | 'glass';
 export type WallpaperMode = 'scaled' | 'tiled';
 
-const THEMES: readonly ThemeName[] = ['current', 'light', 'dark'];
+const THEMES: readonly ThemeName[] = ['current', 'light', 'dark', 'glass'];
 const HP_MODES: readonly HpProgressionMode[] = ['full', 'average', 'roll'];
 const WALLPAPER_MODES: readonly WallpaperMode[] = ['scaled', 'tiled'];
 const selectClass = 'rounded-lg border border-border-strong bg-control px-3 py-1.5 text-sm text-white';
@@ -21,6 +21,12 @@ interface GeneralSettingsFieldsProps {
   onPortraitDbChange?: (source: PortraitDbSource) => void;
   hpMode?: HpProgressionMode;
   onHpModeChange?: (mode: HpProgressionMode) => void;
+  freeArchetype?: boolean;
+  onFreeArchetypeChange?: (enabled: boolean) => void;
+  extraAttributes?: boolean;
+  onExtraAttributesChange?: (enabled: boolean) => void;
+  pdfTemplate?: 'standard' | 'master';
+  onPdfTemplateChange?: (template: 'standard' | 'master') => void;
   wallpaperImage?: string | null;
   onWallpaperImageChange?: (dataUrl: string | null) => void;
   wallpaperMode?: WallpaperMode;
@@ -31,10 +37,16 @@ interface GeneralSettingsFieldsProps {
 export const GeneralSettingsFields: React.FC<GeneralSettingsFieldsProps> = ({
   theme,
   onThemeChange,
-  portraitDb = 'portraitdb',
+  portraitDb = 'none',
   onPortraitDbChange,
   hpMode = 'full',
   onHpModeChange,
+  freeArchetype = false,
+  onFreeArchetypeChange,
+  extraAttributes = false,
+  onExtraAttributesChange,
+  pdfTemplate = 'standard',
+  onPdfTemplateChange,
   wallpaperImage = null,
   onWallpaperImageChange,
   wallpaperMode = 'scaled',
@@ -101,40 +113,97 @@ export const GeneralSettingsFields: React.FC<GeneralSettingsFieldsProps> = ({
         <option value="original">{t('settings.databaseLanguage.original')}</option>
       </select>
     </div>
-    {onPortraitDbChange && (
-      <div className="flex items-start justify-between gap-4 border-t border-border-strong pt-4">
-        <div>
-          <label htmlFor="portrait-database" className="text-sm font-semibold text-white">{t('settings.portraitDb')}</label>
-          <p className="text-xs text-text-secondary">{t('settings.portraitDbHint')}</p>
-        </div>
-        <select
-          id="portrait-database"
-          value={portraitDb}
-          onChange={event => onPortraitDbChange(event.target.value as PortraitDbSource)}
-          className={selectClass}
-        >
-          <option value="portraitdb">portraitdb</option>
-          <option value="none">{t('settings.portraitDb.none')}</option>
-        </select>
-      </div>
-    )}
-    {onHpModeChange && (
+    {(onHpModeChange || onPortraitDbChange) && (
       <div className="border-t border-border-strong pt-4 space-y-3">
         <h3 className="text-xs font-bold uppercase tracking-wider text-text-secondary">{t('settings.gameOptions')}</h3>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <label htmlFor="hp-progression-mode" className="text-sm font-semibold text-white">{t('settings.hpMode')}</label>
-            <p className="text-xs text-text-secondary">{t('settings.hpModeHint')}</p>
+        {onPortraitDbChange && (
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <label htmlFor="portrait-database" className="text-sm font-semibold text-white">{t('settings.portraitDb')}</label>
+              <p className="text-xs text-text-secondary">{t('settings.portraitDbHint')}</p>
+            </div>
+            <select
+              id="portrait-database"
+              value={portraitDb}
+              onChange={event => onPortraitDbChange(event.target.value as PortraitDbSource)}
+              className={selectClass}
+            >
+              <option value="none">{t('settings.portraitDb.none')}</option>
+              <option value="portraitdb">portraitdb</option>
+            </select>
           </div>
-          <select
-            id="hp-progression-mode"
-            value={hpMode}
-            onChange={event => onHpModeChange(event.target.value as HpProgressionMode)}
-            className={selectClass}
-          >
-            {HP_MODES.map(mode => <option key={mode} value={mode}>{t(`settings.hpMode.${mode}`)}</option>)}
+        )}
+        {onHpModeChange && (
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <label htmlFor="hp-progression-mode" className="text-sm font-semibold text-white">{t('settings.hpMode')}</label>
+              <p className="text-xs text-text-secondary">{t('settings.hpModeHint')}</p>
+            </div>
+            <select
+              id="hp-progression-mode"
+              value={hpMode}
+              onChange={event => onHpModeChange(event.target.value as HpProgressionMode)}
+              className={selectClass}
+            >
+              {HP_MODES.map(mode => <option key={mode} value={mode}>{t(`settings.hpMode.${mode}`)}</option>)}
+            </select>
+          </div>
+        )}
+        {(onFreeArchetypeChange || onExtraAttributesChange) && (
+          <div className="pt-2 border-t border-border-subtle space-y-3">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-accent-text">{t('settings.houseRules')}</h4>
+            {onFreeArchetypeChange && (
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <label htmlFor="free-archetype-option" className="text-sm font-semibold text-white">{t('settings.freeArchetype')}</label>
+                  <p className="text-xs text-text-secondary">{t('settings.freeArchetypeHint')}</p>
+                </div>
+                <button
+                  id="free-archetype-option"
+                  type="button"
+                  role="switch"
+                  aria-checked={freeArchetype}
+                  onClick={() => onFreeArchetypeChange(!freeArchetype)}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-bold flex-shrink-0 transition-colors ${
+                    freeArchetype
+                      ? 'bg-status-success-bg text-status-success border-status-success-border'
+                      : 'bg-control text-text-secondary hover:text-white border-border-strong'
+                  }`}
+                >
+                  {freeArchetype ? t('common.on') : t('common.off')}
+                </button>
+              </div>
+            )}
+            {onExtraAttributesChange && (
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <label htmlFor="extra-attributes-option" className="text-sm font-semibold text-white">{t('settings.extraAttributes')}</label>
+                  <p className="text-xs text-text-secondary">{t('settings.extraAttributesHint')}</p>
+                </div>
+                <button
+                  id="extra-attributes-option"
+                  type="button"
+                  role="switch"
+                  aria-checked={extraAttributes}
+                  onClick={() => onExtraAttributesChange(!extraAttributes)}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-bold flex-shrink-0 transition-colors ${
+                    extraAttributes
+                      ? 'bg-status-success-bg text-status-success border-status-success-border'
+                      : 'bg-control text-text-secondary hover:text-white border-border-strong'
+                  }`}
+                >
+                  {extraAttributes ? t('common.on') : t('common.off')}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        {onPdfTemplateChange && <div className="flex flex-wrap items-center justify-between gap-4">
+          <label htmlFor="pdf-template" className="text-sm font-semibold text-white">{t('sheet.pdfTemplate')}</label>
+          <select id="pdf-template" value={pdfTemplate} onChange={event => onPdfTemplateChange(event.target.value as 'standard' | 'master')} className={selectClass}>
+            <option value="standard">{t('sheet.pdfStandard')}</option><option value="master">{t('sheet.pdfMaster')}</option>
           </select>
-        </div>
+        </div>}
       </div>
     )}
     {onWallpaperImageChange && (
@@ -209,6 +278,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onPortraitDbChange,
   hpMode,
   onHpModeChange,
+  freeArchetype,
+  onFreeArchetypeChange,
+  extraAttributes,
+  onExtraAttributesChange,
+  pdfTemplate,
+  onPdfTemplateChange,
   wallpaperImage,
   onWallpaperImageChange,
   wallpaperMode,
@@ -220,7 +295,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useModalFocus(dialogRef, onClose);
 
   return <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 p-4 print:hidden" onClick={onClose}>
-    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="settings-title" className="w-full max-w-md rounded-2xl border border-border-strong bg-surface p-5 shadow-2xl space-y-4" onClick={event => event.stopPropagation()}>
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="settings-title" className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-border-strong bg-surface p-5 shadow-2xl space-y-4" onClick={event => event.stopPropagation()}>
       <div className="flex items-center justify-between gap-3">
         <h2 id="settings-title" className="text-lg font-bold text-white">{t('settings.title')}</h2>
         <button type="button" autoFocus onClick={onClose} aria-label={t('common.close')} className="p-2 rounded-lg text-text-secondary hover:text-white hover:bg-control"><X className="w-5 h-5" /></button>
@@ -232,6 +307,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         onPortraitDbChange={onPortraitDbChange}
         hpMode={hpMode}
         onHpModeChange={onHpModeChange}
+        freeArchetype={freeArchetype}
+        onFreeArchetypeChange={onFreeArchetypeChange}
+        extraAttributes={extraAttributes}
+        onExtraAttributesChange={onExtraAttributesChange}
+        pdfTemplate={pdfTemplate}
+        onPdfTemplateChange={onPdfTemplateChange}
         wallpaperImage={wallpaperImage}
         onWallpaperImageChange={onWallpaperImageChange}
         wallpaperMode={wallpaperMode}

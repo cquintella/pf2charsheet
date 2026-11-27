@@ -1,3 +1,4 @@
+import { ActionSymbol } from './ActionSymbol';
 import React, { useState, useMemo } from 'react';
 import { SpellItem } from '../types/pf2e';
 import { resolveSpellIcon } from '../utils/formatters';
@@ -75,12 +76,12 @@ export const SpellTableView: React.FC<SpellTableViewProps> = ({
   }, [spells, sortField, sortDirection, favoritesSet]);
 
   const renderActionBadge = (time: string) => {
-    if (time === '1') return <span className="pf-action-icon text-[11px] px-1.5">◆ 1</span>;
-    if (time === '2') return <span className="pf-action-icon text-[11px] px-1.5">◆◆ 2</span>;
-    if (time === '3') return <span className="pf-action-icon text-[11px] px-1.5">◆◆◆ 3</span>;
-    if (time === 'reaction') return <span className="pf-action-icon text-[11px] px-1.5 bg-status-danger-bg text-status-danger border-status-danger-border">↺ {t('action.reaction')}</span>;
-    if (time === 'free') return <span className="pf-action-icon text-[11px] px-1.5 bg-status-success-bg text-status-success border-status-success-border">◇ {t('action.freeShort')}</span>;
-    return <span className="pf-action-icon text-[11px] px-1.5">{time || '1'}</span>;
+    if (time === '1') return <span className="pf-action-icon text-xs px-1.5"><ActionSymbol kind="one" /> 1</span>;
+    if (time === '2') return <span className="pf-action-icon text-xs px-1.5"><ActionSymbol kind="two" /> 2</span>;
+    if (time === '3') return <span className="pf-action-icon text-xs px-1.5"><ActionSymbol kind="three" /> 3</span>;
+    if (time === 'reaction') return <span className="pf-action-icon text-xs px-1.5 bg-status-danger-bg text-status-danger border-status-danger-border"><ActionSymbol kind="reaction" /> {t('action.reaction')}</span>;
+    if (time === 'free') return <span className="pf-action-icon text-xs px-1.5 bg-status-success-bg text-status-success border-status-success-border"><ActionSymbol kind="free" /> {t('action.freeShort')}</span>;
+    return <span className="pf-action-icon text-xs px-1.5">{time || '1'}</span>;
   };
 
   const renderSortHeader = (field: SortField, label: React.ReactNode, className: string = '') => {
@@ -112,7 +113,7 @@ export const SpellTableView: React.FC<SpellTableViewProps> = ({
   return (
     <div className="w-full overflow-x-auto rounded-xl border border-border-strong bg-surface shadow">
       <table className="w-full text-left text-xs text-text-primary">
-        <thead className="bg-elevated text-text-secondary uppercase text-[11px] tracking-wider border-b border-border-strong">
+        <thead className="bg-elevated text-text-secondary uppercase text-xs tracking-wider border-b border-border-strong">
           <tr>
             {renderSortHeader('favorite', '⭐', 'w-12 text-center')}
             {renderSortHeader('rank', t('common.levelLabel'), 'w-16 text-center')}
@@ -195,7 +196,7 @@ export const SpellTableView: React.FC<SpellTableViewProps> = ({
                         {spell.name}
                       </span>
                       {spell.rarity && spell.rarity !== 'common' && (
-                        <span className={`ml-2 text-[11px] font-bold uppercase px-1 py-0.5 rounded ${
+                        <span className={`ml-2 text-xs font-bold uppercase px-1 py-0.5 rounded ${
                           spell.rarity === 'uncommon' ? 'bg-status-warn-bg text-status-warn' :
                           spell.rarity === 'rare' ? 'bg-status-info-bg text-status-info' : 'bg-status-purple-bg text-status-purple'
                         }`}>
@@ -215,7 +216,7 @@ export const SpellTableView: React.FC<SpellTableViewProps> = ({
                 <td className="py-3 px-4">
                   <div className="flex flex-wrap gap-1">
                     {traditions.map((trad) => (
-                      <span key={trad} className="text-[11px] font-medium uppercase px-1.5 py-0.5 rounded bg-elevated text-status-info">
+                      <span key={trad} className="text-xs font-medium uppercase px-1.5 py-0.5 rounded bg-elevated text-status-info">
                         {trad}
                       </span>
                     ))}
@@ -232,7 +233,7 @@ export const SpellTableView: React.FC<SpellTableViewProps> = ({
                 {/* Defense */}
                 <td className="py-3 px-4">
                   {spell.defense ? (
-                    <span className="text-status-danger font-bold uppercase text-[11px] px-1.5 py-0.5 rounded bg-status-danger-bg border border-status-danger-border">
+                    <span className="text-status-danger font-bold uppercase text-xs px-1.5 py-0.5 rounded bg-status-danger-bg border border-status-danger-border">
                       {spell.defense}
                     </span>
                   ) : (
@@ -252,13 +253,13 @@ export const SpellTableView: React.FC<SpellTableViewProps> = ({
                             onSelectTrait(t);
                           }
                         }}
-                        className="text-[11px] uppercase px-1.5 py-0.5 rounded bg-status-danger-bg text-status-danger border border-status-danger-border hover:bg-status-danger-bg"
+                        className="text-xs uppercase px-1.5 py-0.5 rounded bg-status-danger-bg text-status-danger border border-status-danger-border hover:bg-status-danger-bg"
                       >
                         {t}
                       </span>
                     ))}
                     {traits.length > 4 && (
-                      <span className="text-[11px] text-text-muted">
+                      <span className="text-xs text-text-muted">
                         +{traits.length - 4}
                       </span>
                     )}

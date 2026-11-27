@@ -12,6 +12,10 @@
     padding: 0;
   }
 
+  html {
+    accent-color: rgb(var(--accent));
+  }
+
   button:focus-visible,
   a:focus-visible,
   input:focus-visible,
@@ -19,24 +23,98 @@
   textarea:focus-visible,
   [role="button"]:focus-visible,
   [tabindex]:focus-visible {
-    outline: 2px solid rgb(var(--status-info));
+    outline: 3px solid rgb(var(--accent) / 0.65);
     outline-offset: 2px;
   }
 
-  /* Custom scrollbars */
+  /* Overlay-style scrollbars keep the content visually prominent. */
   ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
   }
   ::-webkit-scrollbar-track {
-    background: rgb(var(--bg-surface));
+    background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgb(var(--bg-control));
-    border-radius: 4px;
+    background: rgb(var(--text-muted) / 0.45);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgb(var(--bg-control-hover));
+    background-color: rgb(var(--text-muted) / 0.7);
+  }
+}
+
+@media screen {
+  .compendium-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 18.3rem), 1fr));
+    gap: 1rem;
+  }
+
+  .compendium-cards-creatures {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 1fr));
+  }
+
+  select,
+  select option,
+  select optgroup {
+    font-size: 16px;
+    line-height: 1.4;
+  }
+
+  .app-sidebar {
+    background: rgb(var(--bg-surface) / 0.9);
+    border-color: rgb(var(--border-subtle));
+    -webkit-backdrop-filter: blur(24px) saturate(1.2);
+    backdrop-filter: blur(24px) saturate(1.2);
+  }
+
+  .app-sidebar nav button {
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+
+  button, input, select, textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button:not(:disabled), select:not(:disabled),
+  input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  button:disabled, input:disabled, select:disabled, textarea:disabled {
+    cursor: default;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  select, textarea {
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.08);
+  }
+
+  button, input, select, textarea {
+    transition-property: background-color, border-color, color, box-shadow, opacity;
+    transition-duration: 150ms;
+    transition-timing-function: ease;
+  }
+
+  button:active:not(:disabled) {
+    filter: brightness(0.94);
+  }
+
+  [role="dialog"][aria-modal="true"] {
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
 }
 
@@ -101,7 +179,7 @@
   width: 100%;
   border-collapse: collapse;
   margin: 0.75rem 0;
-  font-size: 0.875rem;
+  font-size: 1rem;
 }
 .pf-prose th,
 .pf-prose td {
@@ -125,7 +203,7 @@
   body {
     background-color: #ffffff !important;
     color: #111827 !important;
-    font-size: 11pt !important;
+    font-size: 12pt !important;
   }
 
   aside,
@@ -154,3 +232,5 @@
     print-color-adjust: exact;
   }
 }
+
+.action-symbol { display: inline-block; width: 1.6em; height: 1.15em; vertical-align: middle; background-color: currentColor; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-position: center; mask-position: center; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }

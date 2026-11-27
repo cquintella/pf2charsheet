@@ -81,7 +81,7 @@ export const InventoryView: React.FC<Props> = ({ inventory, strMod = 0, onChange
   }, [search, type, page, initial]);
 
   const add = (item: EquipmentItem) => {
-    const existing = inventory.items.find(entry => entry.item.id === item.id && item.item_type !== 'custom');
+    const existing = inventory.items.find(entry => entry.item.id === item.id && item.item_type !== 'custom' && item.item_type !== 'backpack' && !entry.containerId);
     if (existing) {
       onChange({ ...inventory, items: inventory.items.map(entry => entry.id === existing.id ? { ...entry, quantity: entry.quantity + 1 } : entry) });
     } else {
@@ -89,6 +89,28 @@ export const InventoryView: React.FC<Props> = ({ inventory, strMod = 0, onChange
     }
   };
   const update = (id: string, patch: Partial<InventoryEntry>) => onChange({ ...inventory, items: inventory.items.map(entry => entry.id === id ? { ...entry, ...patch } : entry) });
+  const containers = inventory.items.filter(entry => entry.item.item_type === 'backpack');
+  const isDescendant = (candidateId: string, ancestorId: string): boolean => {
+    const visited = new Set<string>();
+    let current = inventory.items.find(item => item.id === candidateId);
+    while (current?.containerId && !visited.has(current.id)) {
+      if (current.containerId === ancestorId) return true;
+      visited.add(current.id);
+      current = inventory.items.find(item => item.id === current?.containerId);
+    }
+    return false;
+  };
+  const orderedItems: { entry: InventoryEntry; depth: number }[] = [];
+  const visitedItems = new Set<string>();
+  const appendItems = (parentId: string | undefined, depth: number) => {
+    inventory.items.filter(entry => entry.containerId === parentId && !visitedItems.has(entry.id)).forEach(entry => {
+      visitedItems.add(entry.id);
+      orderedItems.push({ entry, depth });
+      appendItems(entry.id, depth + 1);
+    });
+  };
+  appendItems(undefined, 0);
+  inventory.items.filter(entry => !visitedItems.has(entry.id)).forEach(entry => orderedItems.push({ entry, depth: 0 }));
 
   return <section className="bg-surface border border-border-strong rounded-2xl p-5 space-y-5">
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -124,9 +146,9 @@ export const InventoryView: React.FC<Props> = ({ inventory, strMod = 0, onChange
     <div className="space-y-2">
       <h4 className="font-semibold text-sm text-white">{t('inventory.carried')}</h4>
       {inventory.items.length === 0 && <p className="text-xs text-text-secondary">{t('inventory.empty')}</p>}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-        {inventory.items.map(entry => (
-          <div key={entry.id} className="bg-inset border border-border-strong rounded-xl p-3 space-y-2">
+      <div className="flex flex-col gap-2.5">
+        {orderedItems.map(({ entry, depth }) => (
+          <div key={entry.id} style={{ marginInlineStart: `${Math.min(depth, 5) * 1.25}rem` }} className="bg-inset border border-border-strong rounded-xl p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
               <button type="button" className="text-left text-sm font-semibold text-accent-text hover:underline min-w-0 truncate flex-1" onClick={() => setDetail(entry.item)}>
                 {entry.item.name}
@@ -144,6 +166,12 @@ export const InventoryView: React.FC<Props> = ({ inventory, strMod = 0, onChange
                 />
               </label>
             </div>
+            {containers.length > 0 && <label className="flex flex-wrap items-center gap-2 text-text-secondary">{t('inventory.container')}
+              <select className={inputClass} value={entry.containerId || ''} onChange={event => update(entry.id, { containerId: event.target.value || undefined, ...(event.target.value ? { equipped: false } : {}) })}>
+                <option value="">{t('inventory.noContainer')}</option>
+                {containers.filter(container => container.id !== entry.id && !isDescendant(container.id, entry.id)).map(container => <option key={container.id} value={container.id}>{container.item.name}</option>)}
+              </select>
+            </label>}
             <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-border-subtle text-xs">
               <span className="text-text-muted truncate">
                 {entry.item.item_type === 'custom' ? t('inventory.customItem') : itemTypeLabel(t, entry.item.item_type)}
@@ -153,6 +181,7 @@ export const InventoryView: React.FC<Props> = ({ inventory, strMod = 0, onChange
                   <input
                     type="checkbox"
                     checked={entry.equipped}
+                    disabled={!!entry.containerId}
                     onChange={event => {
                       const equipped = event.target.checked;
                       if (equipped && entry.item.item_type === 'armor') {
@@ -167,7 +196,7 @@ export const InventoryView: React.FC<Props> = ({ inventory, strMod = 0, onChange
                 <button
                   type="button"
                   className="text-status-danger hover:underline"
-                  onClick={() => onChange({ ...inventory, items: inventory.items.filter(item => item.id !== entry.id) })}
+                  onClick={() => onChange({ ...inventory, items: inventory.items.filter(item => item.id !== entry.id).map(item => item.containerId === entry.id ? { ...item, containerId: entry.containerId } : item) })}
                 >
                   {t('common.remove')}
                 </button>
@@ -181,7 +210,7 @@ export const InventoryView: React.FC<Props> = ({ inventory, strMod = 0, onChange
       <h4 className="font-semibold text-sm text-white">{t('inventory.addFromCompendium')}</h4>
       <div className="flex flex-wrap gap-2"><input className={`${inputClass} flex-1 min-w-[180px]`} placeholder={t('inventory.searchPlaceholder')} value={search} onChange={event => { setSearch(event.target.value); setPage(0); }} /><select aria-label={t('inventory.typeLabel')} className={inputClass} value={type} onChange={event => { setType(event.target.value); setPage(0); }}><option value="all">{t('spellFilters.allTypes')}</option>{ITEM_TYPES.map(key => <option value={key} key={key}>{itemTypeLabel(t, key)}</option>)}</select></div>
       <div className="flex flex-wrap gap-1" role="group" aria-label={t('inventory.byInitial')}>
-        {['', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'].map(letter => <button key={letter || 'all'} type="button" aria-pressed={initial === letter} onClick={() => { setInitial(letter); setPage(0); }} className={`min-w-[28px] h-7 px-1.5 rounded border text-[11px] font-bold ${initial === letter ? 'bg-accent border-accent text-accent-contrast' : 'bg-inset border-border-strong text-text-secondary hover:text-white'}`}>{letter || t('common.allFem')}</button>)}
+        {['', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'].map(letter => <button key={letter || 'all'} type="button" aria-pressed={initial === letter} onClick={() => { setInitial(letter); setPage(0); }} className={`min-w-[28px] h-7 px-1.5 rounded border text-xs font-bold ${initial === letter ? 'bg-accent border-accent text-accent-contrast' : 'bg-inset border-border-strong text-text-secondary hover:text-white'}`}>{letter || t('common.allFem')}</button>)}
       </div>
       {error && <p role="alert" className="text-xs text-status-danger">{t('inventory.loadError')}</p>}
       {loading ? <p className="text-xs text-text-secondary">{t('common.loading')}</p> : <div className="max-h-64 overflow-y-auto space-y-1">{results.map(item => <div key={item.id} className="flex items-center justify-between gap-2 bg-inset rounded-lg px-3 py-2 text-xs"><button type="button" className="text-left text-text-primary min-w-0 truncate" onClick={() => setDetail(item)}>{item.name} <span className="text-text-secondary">· {itemTypeLabel(t, item.item_type)} · {t('common.levelShort', { level: item.level })} · {item.price || t('inventory.noPrice')}</span></button><button type="button" className="text-accent-text font-bold flex-shrink-0" onClick={() => add(item)}>{t('spellbook.add')}</button></div>)}{results.length === 0 && <p className="text-xs text-text-secondary">{t('inventory.noResults')}</p>}</div>}

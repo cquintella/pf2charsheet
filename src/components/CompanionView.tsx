@@ -87,7 +87,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
         <div className="py-10 text-center space-y-1.5 bg-inset border border-dashed border-border-strong rounded-xl px-4">
           <PawPrint className="w-8 h-8 text-text-muted mx-auto opacity-60" />
           <p className="text-xs font-semibold text-text-secondary">{t('companion.empty')}</p>
-          <p className="text-[11px] text-text-muted max-w-md mx-auto">{t('companion.emptyHint')}</p>
+          <p className="text-xs text-text-muted max-w-md mx-auto">{t('companion.emptyHint')}</p>
         </div>
       ) : (
         <div className="space-y-5">
@@ -99,7 +99,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                 <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3 pb-3 border-b border-border-subtle">
                   <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 flex-1">
                     <label className="sm:col-span-5 space-y-1">
-                      <span className="text-[11px] font-bold uppercase text-text-muted block">{t('companion.name')}</span>
+                      <span className="text-xs font-bold uppercase text-text-muted block">{t('companion.name')}</span>
                       <input
                         type="text"
                         value={comp.name}
@@ -109,7 +109,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                     </label>
 
                     <label className="sm:col-span-3 space-y-1">
-                      <span className="text-[11px] font-bold uppercase text-text-muted block">{t('companion.kind')}</span>
+                      <span className="text-xs font-bold uppercase text-text-muted block">{t('companion.kind')}</span>
                       <select
                         value={comp.kind}
                         onChange={(e) => updateOne(comp.id, { kind: e.target.value as CompanionKind })}
@@ -124,7 +124,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                     </label>
 
                     <label className="sm:col-span-3 space-y-1">
-                      <span className="text-[11px] font-bold uppercase text-text-muted block">{t('companion.species')}</span>
+                      <span className="text-xs font-bold uppercase text-text-muted block">{t('companion.species')}</span>
                       <input
                         type="text"
                         value={comp.species}
@@ -135,7 +135,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                     </label>
 
                     <label className="sm:col-span-1 space-y-1">
-                      <span className="text-[11px] font-bold uppercase text-text-muted block">{t('common.levelLabel')}</span>
+                      <span className="text-xs font-bold uppercase text-text-muted block">{t('common.levelLabel')}</span>
                       <input
                         type="number"
                         min={1}
@@ -162,7 +162,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                   {/* HP */}
                   <div className="lg:col-span-4 bg-surface border border-border-subtle rounded-xl p-3 space-y-2 flex flex-col justify-between">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-bold uppercase text-status-danger flex items-center gap-1.5">
+                      <span className="text-xs font-bold uppercase text-status-danger flex items-center gap-1.5">
                         <Heart className="w-3.5 h-3.5" />
                         <span>{t('common.hp')}</span>
                       </span>
@@ -196,7 +196,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
 
                   {/* AC */}
                   <label className="lg:col-span-2 bg-surface border border-border-subtle rounded-xl p-3 flex flex-col justify-between gap-1.5">
-                    <span className="text-[11px] font-bold uppercase text-status-info flex items-center gap-1.5">
+                    <span className="text-xs font-bold uppercase text-status-info flex items-center gap-1.5">
                       <Shield className="w-3.5 h-3.5" />
                       <span>{t('common.ac')}</span>
                     </span>
@@ -211,13 +211,13 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
 
                   {/* Saving Throws Capsule */}
                   <div className="lg:col-span-6 bg-surface border border-border-subtle rounded-xl p-3 space-y-2">
-                    <span className="text-[11px] font-bold uppercase text-text-secondary flex items-center gap-1.5">
+                    <span className="text-xs font-bold uppercase text-text-secondary flex items-center gap-1.5">
                       <Shield className="w-3.5 h-3.5 text-accent-text" />
                       <span>{t('creator.savingThrows')}</span>
                     </span>
                     <div className="grid grid-cols-3 gap-2">
                       <label className="bg-inset border border-border-subtle rounded-lg px-2 py-1.5 flex items-center justify-between gap-1.5">
-                        <span className="text-[11px] font-bold uppercase text-text-muted truncate">{t('sheet.fortitude')}</span>
+                        <span className="text-xs font-bold uppercase text-text-muted truncate">{t('sheet.fortitude')}</span>
                         <input
                           type="number"
                           value={comp.fortitude}
@@ -226,7 +226,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                         />
                       </label>
                       <label className="bg-inset border border-border-subtle rounded-lg px-2 py-1.5 flex items-center justify-between gap-1.5">
-                        <span className="text-[11px] font-bold uppercase text-text-muted truncate">{t('sheet.reflex')}</span>
+                        <span className="text-xs font-bold uppercase text-text-muted truncate">{t('sheet.reflex')}</span>
                         <input
                           type="number"
                           value={comp.reflex}
@@ -235,7 +235,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                         />
                       </label>
                       <label className="bg-inset border border-border-subtle rounded-lg px-2 py-1.5 flex items-center justify-between gap-1.5">
-                        <span className="text-[11px] font-bold uppercase text-text-muted truncate">{t('sheet.will')}</span>
+                        <span className="text-xs font-bold uppercase text-text-muted truncate">{t('sheet.will')}</span>
                         <input
                           type="number"
                           value={comp.will}
@@ -250,7 +250,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                 {/* 3. Percepção, Movimento & Sentidos */}
                 <div className="bg-surface border border-border-subtle rounded-xl p-3 grid grid-cols-2 sm:grid-cols-12 gap-2.5 items-end">
                   <label className="sm:col-span-2 space-y-1">
-                    <span className="text-[11px] font-bold uppercase text-status-purple flex items-center gap-1">
+                    <span className="text-xs font-bold uppercase text-status-purple flex items-center gap-1">
                       <Eye className="w-3.5 h-3.5" /> {t('sheet.perception')}
                     </span>
                     <input
@@ -262,7 +262,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                   </label>
 
                   <label className="sm:col-span-2 space-y-1">
-                    <span className="text-[11px] font-bold uppercase text-status-warn flex items-center gap-1">
+                    <span className="text-xs font-bold uppercase text-status-warn flex items-center gap-1">
                       <Footprints className="w-3.5 h-3.5" /> {t('creator.speed')}
                     </span>
                     <input
@@ -276,7 +276,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                   </label>
 
                   <label className="col-span-2 sm:col-span-3 space-y-1">
-                    <span className="text-[11px] font-bold uppercase text-text-muted flex items-center gap-1">
+                    <span className="text-xs font-bold uppercase text-text-muted flex items-center gap-1">
                       <Sparkles className="w-3.5 h-3.5 text-accent-text" /> {t('sheet.vision')}
                     </span>
                     <select
@@ -293,7 +293,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                   </label>
 
                   <label className="col-span-1 sm:col-span-2 space-y-1">
-                    <span className="text-[11px] font-bold uppercase text-text-muted block">{t('companion.visionRange')}</span>
+                    <span className="text-xs font-bold uppercase text-text-muted block">{t('companion.visionRange')}</span>
                     <input
                       type="text"
                       value={comp.visionRange || ''}
@@ -303,7 +303,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                   </label>
 
                   <label className="col-span-1 sm:col-span-3 space-y-1">
-                    <span className="text-[11px] font-bold uppercase text-text-muted block">{t('sheet.sensesPlaceholder')}</span>
+                    <span className="text-xs font-bold uppercase text-text-muted block">{t('sheet.sensesPlaceholder')}</span>
                     <input
                       type="text"
                       value={comp.senses}
@@ -315,7 +315,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                 </div>
 
                 <div className="bg-surface border border-border-subtle rounded-xl p-3 space-y-2">
-                  <span className="text-[11px] font-bold uppercase text-text-secondary">{t('companion.skills')}</span>
+                  <span className="text-xs font-bold uppercase text-text-secondary">{t('companion.skills')}</span>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                     {ALL_SKILLS.map((skill: SkillKey) => {
                       const selected = Object.prototype.hasOwnProperty.call(comp.skills || {}, skill);
@@ -354,7 +354,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                 {/* 4. Ações em Combate: Ataques & Benefício de Suporte */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <label className="bg-surface border border-border-subtle rounded-xl p-3 space-y-1.5">
-                    <span className="text-[11px] font-bold uppercase text-accent-text flex items-center gap-1.5">
+                    <span className="text-xs font-bold uppercase text-accent-text flex items-center gap-1.5">
                       <Swords className="w-3.5 h-3.5" />
                       <span>{t('companion.attacks')}</span>
                     </span>
@@ -368,7 +368,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
                   </label>
 
                   <label className="bg-surface border border-border-subtle rounded-xl p-3 space-y-1.5">
-                    <span className="text-[11px] font-bold uppercase text-status-info flex items-center gap-1.5">
+                    <span className="text-xs font-bold uppercase text-status-info flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5" />
                       <span>{t('companion.support')}</span>
                     </span>
@@ -384,14 +384,14 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ companions, charac
 
                 {/* 5. Referência Secundária: Atributos & Notas */}
                 <div className="bg-surface border border-border-subtle rounded-xl p-3 space-y-2.5">
-                  <span className="text-[11px] font-bold uppercase text-text-secondary flex items-center gap-1.5">
+                  <span className="text-xs font-bold uppercase text-text-secondary flex items-center gap-1.5">
                     <Star className="w-3.5 h-3.5 text-accent-text" />
                     <span>{t('sheet.consolidatedAttributes')}</span>
                   </span>
                   <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                     {ALL_ATTRIBUTES.map((attr: AttributeKey) => (
                       <label key={attr} className="bg-inset border border-border-subtle rounded-lg p-1.5 text-center space-y-1">
-                        <span className="text-[11px] font-bold uppercase text-text-muted block">
+                        <span className="text-xs font-bold uppercase text-text-muted block">
                           {attributeShort(t, attr)}
                         </span>
                         <input

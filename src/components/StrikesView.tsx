@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AttributeKey, CharacterStrike, InventoryEntry, ClassItem, ProficiencyRank } from '../types/pf2e';
+import { AttributeKey, CharacterStrike, InventoryEntry, ProficiencyRank } from '../types/pf2e';
 import { calculateWeaponStrike } from '../utils/strikeCalculation';
 import { WeaponActions } from './WeaponActions';
 import { ProficiencySelector } from './ProficiencySelector';
@@ -12,7 +12,8 @@ interface Props {
   strikes: CharacterStrike[];
   attributes: Record<AttributeKey, number>;
   inventory: InventoryEntry[];
-  characterClass: ClassItem | null;
+  /** Current rank per weapon category (simple, martial, advanced, unarmed), including class features. */
+  attackRanks: Partial<Record<string, ProficiencyRank>>;
   level: number;
   athleticsRank: ProficiencyRank;
   strAttackPenalty?: number;
@@ -21,14 +22,14 @@ interface Props {
   onChange: (strikes: CharacterStrike[]) => void;
 }
 const field = 'w-full min-w-0 rounded-lg border border-border-strong bg-inset px-2 py-1.5 text-sm text-white';
-const label = 'text-[11px] font-semibold text-text-secondary uppercase space-y-1';
+const label = 'text-xs font-semibold text-text-secondary uppercase space-y-1';
 const signed = (value: number) => value >= 0 ? `+${value}` : String(value);
 
 export const StrikesView: React.FC<Props> = ({
   strikes,
   attributes,
   inventory,
-  characterClass,
+  attackRanks,
   level,
   athleticsRank,
   strAttackPenalty = 0,
@@ -65,7 +66,7 @@ export const StrikesView: React.FC<Props> = ({
         const selectedId = strike.inventoryEntryId || (legacyMatches.length === 1 ? legacyMatches[0].id : '');
         const missingWeapon = selectedId ? !weapons.some(entry => entry.id === selectedId) : Boolean(strike.weapon);
         const selectedWeapon = weapons.find(entry => entry.id === selectedId);
-        const weaponData = selectedWeapon ? calculateWeaponStrike(selectedWeapon.item, kind, attributes.str, characterClass) : null;
+        const weaponData = selectedWeapon ? calculateWeaponStrike(selectedWeapon.item, kind, attributes.str, attackRanks) : null;
         const itemBonus = weaponData?.itemBonus ?? strike.itemBonus;
         const dice = weaponData?.dice ?? strike.dice;
         const strengthDamage = weaponData?.strengthDamage ?? strike.strengthDamage;
@@ -74,7 +75,9 @@ export const StrikesView: React.FC<Props> = ({
         const isAgile = traitsList.some(tr => tr.toLowerCase() === 'agile');
         const mapStep = isAgile ? 4 : 5;
         const penalty = strike.attribute === 'str' ? strAttackPenalty : dexAttackPenalty;
-        const attack = attributes[strike.attribute] + getProficiencyBonus(strike.proficiency, level) + itemBonus + penalty;
+        // Class progression (e.g. Weapon Expertise) can raise the rank saved when the weapon was linked.
+        const proficiency = (weaponData?.proficiency != null ? Math.max(strike.proficiency, weaponData.proficiency) : strike.proficiency) as ProficiencyRank;
+        const attack = attributes[strike.attribute] + getProficiencyBonus(proficiency, level) + itemBonus + penalty;
         const totalDamageMod = strengthDamage + strike.otherDamage + (kind === 'melee' ? strDamagePenalty : 0);
         const isEditing = editingIds.has(strike.id) || !strike.weapon;
 
@@ -107,7 +110,7 @@ export const StrikesView: React.FC<Props> = ({
           {traitsList.length > 0 && !isEditing && (
             <div className="flex flex-wrap gap-1">
               {traitsList.map(tr => (
-                <span key={tr} className="text-[11px] uppercase px-2 py-0.5 rounded-full bg-elevated text-text-secondary border border-border-subtle">
+                <span key={tr} className="text-xs uppercase px-2 py-0.5 rounded-full bg-elevated text-text-secondary border border-border-subtle">
                   {tr}
                 </span>
               ))}
@@ -120,7 +123,7 @@ export const StrikesView: React.FC<Props> = ({
               traits={traitsList}
               athletics={attributes.str + getProficiencyBonus(athleticsRank, level) + itemBonus + strAttackPenalty}
               athleticsRank={athleticsRank}
-              weaponRank={strike.proficiency}
+              weaponRank={proficiency}
               rangeIncrement={weaponData?.rangeIncrement ?? null}
             />
           )}
@@ -130,7 +133,7 @@ export const StrikesView: React.FC<Props> = ({
               <label className={`${label} sm:col-span-2`}>{t('strikes.weapon')}
                 <select className={field} value={missingWeapon ? '__missing__' : selectedId} onChange={event => {
                   const weapon = weapons.find(entry => entry.id === event.target.value);
-                  const data = weapon ? calculateWeaponStrike(weapon.item, kind, attributes.str, characterClass) : null;
+                  const data = weapon ? calculateWeaponStrike(weapon.item, kind, attributes.str, attackRanks) : null;
                   update(strike.id, { inventoryEntryId: weapon?.id, weapon: weapon?.item.name || '', damageTypeOverride: undefined, ...(data?.proficiency !== null && data?.proficiency !== undefined ? { proficiency: data.proficiency } : {}) });
                 }}>
                   <option value="">{t('strikes.selectWeapon')}</option>

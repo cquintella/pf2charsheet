@@ -16,6 +16,7 @@ CREATE INDEX IF NOT EXISTS idx_items_type ON items(type);
 CREATE INDEX IF NOT EXISTS idx_items_level ON items(level);
 CREATE INDEX IF NOT EXISTS idx_items_category ON items(category);
 CREATE INDEX IF NOT EXISTS idx_items_slug ON items(slug);
+CREATE TABLE IF NOT EXISTS sources (name TEXT PRIMARY KEY COLLATE NOCASE, edition TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS ancestries (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

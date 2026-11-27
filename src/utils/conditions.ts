@@ -14,6 +14,7 @@ export interface SessionState {
     drained: number;
     enfeebled: number;
     slowed: number;
+    stupefied: number;
     offGuard: boolean;
   };
 }
@@ -34,6 +35,7 @@ export const DEFAULT_SESSION_STATE: SessionState = {
     drained: 0,
     enfeebled: 0,
     slowed: 0,
+    stupefied: 0,
     offGuard: false,
   },
 };
@@ -47,6 +49,8 @@ export interface ConditionPenalties {
   strChecks: number;
   dexChecks: number;
   strDamage: number;
+  /** Int/Wis/Cha-based checks and DCs (spell attack, spell DC, mental skills). */
+  mentalChecks: number;
   allChecks: number;
   maxHpReduction: number;
 }
@@ -69,13 +73,14 @@ export function computeConditionPenalties(
 
   return {
     ac: shieldBonus - acStatus - acCirc,
-    perception: -globalStatus,
+    perception: -Math.max(globalStatus, c.stupefied),
     fortitude: -Math.max(globalStatus, c.drained),
     reflex: -Math.max(globalStatus, c.clumsy),
-    will: -globalStatus,
+    will: -Math.max(globalStatus, c.stupefied),
     strChecks: -Math.max(globalStatus, c.enfeebled),
     dexChecks: -Math.max(globalStatus, c.clumsy),
     strDamage: -c.enfeebled,
+    mentalChecks: -Math.max(globalStatus, c.stupefied),
     allChecks: -globalStatus,
     maxHpReduction: c.drained * level,
   };

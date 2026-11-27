@@ -1,3 +1,4 @@
+import { ActionSymbol } from './ActionSymbol';
 import React from 'react';
 import { FeatItem } from '../types/pf2e';
 import { resolvePf2eIcon, cleanSnippetText } from '../utils/formatters';
@@ -12,6 +13,7 @@ interface FeatCardProps {
   onToggleFavorite: (e: React.MouseEvent) => void;
   onClick: () => void;
   onSelectTrait?: (trait: string) => void;
+  characterLevel?: number;
 }
 
 export const FeatCard: React.FC<FeatCardProps> = ({
@@ -19,7 +21,8 @@ export const FeatCard: React.FC<FeatCardProps> = ({
   isFavorite,
   onToggleFavorite,
   onClick,
-  onSelectTrait
+  onSelectTrait,
+  characterLevel
 }) => {
   const { t } = useI18n();
   let traits: string[] = [];
@@ -94,36 +97,36 @@ export const FeatCard: React.FC<FeatCardProps> = ({
   const renderActionBadge = () => {
     if (feat.action_type === 'passive') {
       return (
-        <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-elevated text-text-secondary border border-border-strong" title={t('action.passive')}>
+        <span className="px-2 py-0.5 rounded text-xs font-bold bg-elevated text-text-secondary border border-border-strong" title={t('action.passive')}>
           ⚙ {t('action.passive')}
         </span>
       );
     }
     if (feat.action_type === 'reaction') {
       return (
-        <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-status-danger-bg text-status-danger border border-status-danger-border" title={t('action.reaction')}>
-          ↺ {t('action.reaction')}
+        <span className="px-2 py-0.5 rounded text-xs font-bold bg-status-danger-bg text-status-danger border border-status-danger-border" title={t('action.reaction')}>
+          <ActionSymbol kind="reaction" /> {t('action.reaction')}
         </span>
       );
     }
     if (feat.action_type === 'free') {
       return (
-        <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-status-success-bg text-status-success border border-status-success-border" title={t('action.free')}>
-          ◇ {t('action.freeShort')}
+        <span className="px-2 py-0.5 rounded text-xs font-bold bg-status-success-bg text-status-success border border-status-success-border" title={t('action.free')}>
+          <ActionSymbol kind="free" /> {t('action.freeShort')}
         </span>
       );
     }
     if (feat.actions === '1') {
-      return <span className="pf-action-icon text-[11px] px-1.5" title={t('action.1')}>◆ 1</span>;
+      return <span className="pf-action-icon text-xs px-1.5" title={t('action.1')}><ActionSymbol kind="one" /> 1</span>;
     }
     if (feat.actions === '2') {
-      return <span className="pf-action-icon text-[11px] px-1.5" title={t('action.2')}>◆◆ 2</span>;
+      return <span className="pf-action-icon text-xs px-1.5" title={t('action.2')}><ActionSymbol kind="two" /> 2</span>;
     }
     if (feat.actions === '3') {
-      return <span className="pf-action-icon text-[11px] px-1.5" title={t('action.3')}>◆◆◆ 3</span>;
+      return <span className="pf-action-icon text-xs px-1.5" title={t('action.3')}><ActionSymbol kind="three" /> 3</span>;
     }
     return (
-      <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-elevated text-text-primary border border-border-strong">
+      <span className="px-2 py-0.5 rounded text-xs font-bold bg-elevated text-text-primary border border-border-strong">
         {t('action.generic')}
       </span>
     );
@@ -134,8 +137,8 @@ export const FeatCard: React.FC<FeatCardProps> = ({
   return (
     <div
       {...clickableProps(onClick)}
-      className={`group relative flex flex-col justify-between min-h-[250px] bg-surface hover:bg-elevated border-2 rounded-xl p-3.5 transition-all duration-200 cursor-pointer shadow-md hover:shadow-xl hover:-translate-y-0.5 overflow-hidden ${theme.borderClass} ${
-        isFavorite ? 'shadow-[0_0_14px_rgba(224,168,69,0.25)]' : ''
+      className={`feat-compendium-card group relative flex flex-col justify-between min-h-[250px] bg-surface hover:bg-elevated border-2 rounded-xl p-3.5 transition-all duration-200 cursor-pointer shadow-md hover:shadow-xl hover:-translate-y-0.5 overflow-hidden ${theme.borderClass} ${
+        isFavorite ? 'shadow-[0_0_14px_rgb(var(--accent)/0.25)]' : ''
       }`}
     >
       <div className="flex-1 flex flex-col">
@@ -151,7 +154,7 @@ export const FeatCard: React.FC<FeatCardProps> = ({
             </span>
 
             {/* Category Badge */}
-            <span className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded border border-transparent ${theme.badgeBg} ${theme.badgeText}`}>
+            <span className={`text-xs font-bold uppercase px-2 py-0.5 rounded border border-transparent ${theme.badgeBg} ${theme.badgeText}`}>
               {theme.label}
             </span>
           </div>
@@ -172,7 +175,7 @@ export const FeatCard: React.FC<FeatCardProps> = ({
               <Star 
                 className={`w-4 h-4 transition-all ${
                   isFavorite 
-                    ? 'text-accent-text fill-accent drop-shadow-[0_0_6px_rgba(224,168,69,0.6)]' 
+                    ? 'text-accent-text fill-accent drop-shadow-[0_0_6px_rgb(var(--accent)/0.6)]'
                     : 'text-text-muted hover:text-accent-text'
                 }`} 
               />
@@ -197,7 +200,7 @@ export const FeatCard: React.FC<FeatCardProps> = ({
               {feat.name}
             </h3>
             {feat.rarity && feat.rarity !== 'common' && (
-              <span className={`text-[11px] font-bold uppercase px-1.5 py-0.5 rounded inline-block mt-0.5 ${
+              <span className={`text-xs font-bold uppercase px-1.5 py-0.5 rounded inline-block mt-0.5 ${
                 feat.rarity === 'uncommon' ? 'bg-status-warn-bg text-status-warn' :
                 feat.rarity === 'rare' ? 'bg-status-info-bg text-status-info' : 'bg-status-purple-bg text-status-purple'
               }`}>
@@ -225,13 +228,13 @@ export const FeatCard: React.FC<FeatCardProps> = ({
                   onSelectTrait(t);
                 }
               }}
-              className="text-[11px] font-medium uppercase px-1.5 py-0.5 rounded bg-elevated text-status-info border border-border-strong hover:bg-control"
+              className="text-xs font-medium uppercase px-1.5 py-0.5 rounded bg-elevated text-status-info border border-border-strong hover:bg-control"
             >
               {t}
             </span>
           ))}
           {traits.length > 4 && (
-            <span className="text-[11px] text-text-secondary self-center">
+            <span className="text-xs text-text-secondary self-center">
               +{traits.length - 4}
             </span>
           )}
@@ -239,8 +242,8 @@ export const FeatCard: React.FC<FeatCardProps> = ({
 
         {/* Description Snippet Proporcional ao Formato MTG (63:88) */}
         <div className="flex-1 mt-2.5 p-2.5 rounded-lg bg-inset border border-border-subtle overflow-hidden">
-          <p className="text-[14px] text-text-secondary line-clamp-6 leading-relaxed tracking-[0.01em]">
-            {cleanSnippetText(feat.description)}
+          <p className="text-base text-text-secondary line-clamp-6 leading-relaxed tracking-[0.01em]">
+            {cleanSnippetText(feat.description, { actorLevel: characterLevel })}
           </p>
         </div>
       </div>

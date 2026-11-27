@@ -7,8 +7,12 @@ export default {
   darkMode: 'class',
   theme: {
     extend: {
+      fontSize: {
+        xs: ['1rem', { lineHeight: '1.5rem' }],
+        sm: ['1rem', { lineHeight: '1.5rem' }],
+      },
       fontFamily: {
-        sans: ['"Inter"', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        sans: ['-apple-system', 'BlinkMacSystemFont', 'system-ui', '"Segoe UI"', 'Roboto', '"Inter"', 'sans-serif'],
       },
       colors: {
         canvas: 'rgb(var(--bg-canvas) / <alpha-value>)',

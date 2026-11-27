@@ -2,12 +2,101 @@ import type { SavedCharacterRecord } from '../types/pf2e';
 
 export type PortraitDbSource = 'portraitdb' | 'none';
 const PORTRAIT_DB_STORAGE_KEY = 'pf2e_portrait_db';
+const CUSTOM_PORTRAITS_STORAGE_KEY = 'pf2e_custom_portraits';
+
+export const PORTRAIT_SEXES = ['Female', 'Male', 'Other'] as const;
+export type PortraitSex = (typeof PORTRAIT_SEXES)[number];
+
+export interface CustomPortraitEntry {
+  path: string;
+  species: string;
+  sex: string;
+  className: string;
+}
+
+export interface PortraitCriteria {
+  readonly species: string;
+  readonly sex: string;
+  readonly search?: string;
+}
+
+/** Filters and queries portraits provided by an optional portrait plugin. */
+export class PortraitGallery {
+  constructor(private readonly portraits: readonly CustomPortraitEntry[]) {}
+
+  get all(): readonly CustomPortraitEntry[] {
+    return this.portraits;
+  }
+
+  get species(): string[] {
+    return [...new Set(this.portraits.map((portrait) => portrait.species))].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base' })
+    );
+  }
+
+  matching(criteria: PortraitCriteria): CustomPortraitEntry[] {
+    const query = (criteria.search ?? '').trim().toLowerCase();
+    return this.portraits.filter((portrait) => {
+      const speciesMatch =
+        criteria.species === '' ||
+        portrait.species.localeCompare(criteria.species, undefined, { sensitivity: 'base' }) === 0;
+      const sexMatch =
+        criteria.sex === '' ||
+        portrait.sex.localeCompare(criteria.sex, undefined, { sensitivity: 'base' }) === 0;
+      const searchMatch =
+        query === '' ||
+        portrait.species.toLowerCase().includes(query) ||
+        portrait.className.toLowerCase().includes(query) ||
+        portrait.path.toLowerCase().includes(query);
+      return speciesMatch && sexMatch && searchMatch;
+    });
+  }
+
+  defaultSpeciesFor(characterSpecies: string): string {
+    return (
+      this.species.find(
+        (held) => held.localeCompare(characterSpecies, undefined, { sensitivity: 'base' }) === 0
+      ) ?? ''
+    );
+  }
+}
 
 export function getSelectedPortraitDb(): PortraitDbSource {
   try {
-    return localStorage.getItem(PORTRAIT_DB_STORAGE_KEY) === 'none' ? 'none' : 'portraitdb';
+    return localStorage.getItem(PORTRAIT_DB_STORAGE_KEY) === 'portraitdb' ? 'portraitdb' : 'none';
   } catch {
-    return 'portraitdb';
+    return 'none';
+  }
+}
+
+export function getLocalCustomPortraits(): CustomPortraitEntry[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_PORTRAITS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is CustomPortraitEntry =>
+        Boolean(item) &&
+        typeof (item as CustomPortraitEntry).path === 'string' &&
+        typeof (item as CustomPortraitEntry).species === 'string' &&
+        typeof (item as CustomPortraitEntry).sex === 'string'
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function saveLocalCustomPortrait(entry: CustomPortraitEntry): void {
+  try {
+    const existing = getLocalCustomPortraits().filter((item) => item.path !== entry.path);
+    const next = [...existing, entry].sort((a, b) =>
+      a.species.localeCompare(b.species, undefined, { sensitivity: 'base' })
+      || a.sex.localeCompare(b.sex, undefined, { sensitivity: 'base' })
+    );
+    localStorage.setItem(CUSTOM_PORTRAITS_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    /* ignore storage limits */
   }
 }
 

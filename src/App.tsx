@@ -3,20 +3,28 @@ import {
   SpellFilters, 
   SpellItem, 
   SpellMetadata, 
-  SavedCharacterRecord
+  SavedCharacterRecord,
+  CreatureItem,
+  CharacterCompanion,
+  AttributeKey,
+  SkillKey
 } from './types/pf2e';
 import { 
   fetchSpells, 
+  fetchSpellById,
   fetchSpellMetadata, 
   fetchCharacters, 
   saveCharacter,
-  deleteCharacter 
+  deleteCharacter,
+  deleteCatalogEntry
 } from './services/api';
 import { EquipmentItem } from './types/pf2e';
 import { SpellFiltersBar } from './components/SpellFiltersBar';
 import { SpellCard } from './components/SpellCard';
 import { SpellTableView } from './components/SpellTableView';
 import { SpellDetailModal } from './components/SpellDetailModal';
+import { CatalogEditorModal } from './components/CatalogEditorModal';
+import { SourcesView } from './components/SourcesView';
 import { SpellbookBuilderView } from './components/SpellbookBuilderView';
 import { CharacterCreatorView } from './components/CharacterCreatorView';
 import { LevelProgressionView, SheetGuard } from './components/LevelProgressionView';
@@ -30,6 +38,7 @@ import { ConfirmDialog } from './components/ConfirmDialog';
 import { SplashScreen } from './components/SplashScreen';
 import { useI18n } from './i18n/I18nContext';
 import { clickableProps } from './utils/useModalFocus';
+import { ALL_SKILLS } from './utils/formatters';
 import { getCharacterPortrait, getSelectedPortraitDb, PortraitDbSource, resolvePortraitSrc, setSelectedPortraitDb } from './utils/portrait';
 import { 
   BookOpen, 
@@ -55,7 +64,8 @@ import {
   PawPrint,
   Settings,
   Dices,
-  Image as ImageIcon
+  Image as ImageIcon,
+  ExternalLink
 } from 'lucide-react';
 
 const INITIAL_FILTERS: SpellFilters = {
@@ -78,10 +88,10 @@ export const App: React.FC = () => {
   const [showDiceRoller, setShowDiceRoller] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const handleSplashDone = useCallback(() => setShowSplash(false), []);
-  const [activeTab, setActiveTabValue] = useState<'creator' | 'levels' | 'catalog' | 'feats' | 'items' | 'creatures' | 'spellbooks'>('levels');
+  const [activeTab, setActiveTabValue] = useState<'creator' | 'levels' | 'catalog' | 'feats' | 'items' | 'creatures' | 'spellbooks' | 'sources'>('levels');
   const [levelsInitialTab, setLevelsInitialTab] = useState<'combat' | 'progression' | undefined>(undefined);
   const [theme, setTheme] = useState<ThemeName>(() => {
-    try { const value = localStorage.getItem('pf2e_theme'); return value === 'light' || value === 'dark' ? value : 'current'; } catch { return 'current'; }
+    try { const value = localStorage.getItem('pf2e_theme'); return value === 'light' || value === 'dark' || value === 'glass' ? value : 'current'; } catch { return 'current'; }
   });
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -102,6 +112,24 @@ export const App: React.FC = () => {
   useEffect(() => {
     try { localStorage.setItem('pf2e_hp_mode', hpMode); } catch { /* ignore */ }
   }, [hpMode]);
+  const [freeArchetypeOption, setFreeArchetypeOption] = useState<boolean>(() => {
+    try { return localStorage.getItem('pf2e_free_archetype') === 'true'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('pf2e_free_archetype', String(freeArchetypeOption)); } catch { /* ignore */ }
+  }, [freeArchetypeOption]);
+  const [extraAttributesOption, setExtraAttributesOption] = useState<boolean>(() => {
+    try { return localStorage.getItem('pf2e_extra_attributes') === 'true'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('pf2e_extra_attributes', String(extraAttributesOption)); } catch { /* ignore */ }
+  }, [extraAttributesOption]);
+  const [pdfTemplate, setPdfTemplate] = useState<'standard' | 'master'>(() => {
+    try { return localStorage.getItem('pf2e_pdf_template') === 'master' ? 'master' : 'standard'; } catch { return 'standard'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('pf2e_pdf_template', pdfTemplate); } catch { /* ignore */ }
+  }, [pdfTemplate]);
   const [wallpaperImage, setWallpaperImage] = useState<string | null>(() => {
     try {
       const saved = localStorage.getItem('pf2e_wallpaper_image');
@@ -130,6 +158,10 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [selectedSpell, setSelectedSpell] = useState<SpellItem | null>(null);
+  const [spellEditor, setSpellEditor] = useState<{ spell: SpellItem | null } | null>(null);
+  const [spellDelete, setSpellDelete] = useState<SpellItem | null>(null);
+  const [spellError, setSpellError] = useState('');
+  const [spellWorking, setSpellWorking] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
 
   const sheetGuard = useRef<SheetGuard | null>(null);
@@ -144,6 +176,38 @@ export const App: React.FC = () => {
     if (tab === activeTab) return;
     requestTransition(() => setActiveTabValue(tab));
   };
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.isComposing || event.repeat) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      const key = event.key.toLowerCase();
+      if (!event.shiftKey && key === 's' && sheetGuard.current) {
+        event.preventDefault();
+        void sheetGuard.current.save();
+        return;
+      }
+      if (!event.shiftKey && key === 'f') {
+        const input = document.querySelector<HTMLInputElement>('[data-shortcut-search]');
+        if (input) { event.preventDefault(); input.focus(); input.select(); }
+        return;
+      }
+      if (!event.shiftKey && key === 'p' && activeTab === 'levels') {
+        const button = document.querySelector<HTMLButtonElement>('[data-shortcut="export-pdf"]');
+        if (button && !button.disabled) { event.preventDefault(); button.click(); }
+        return;
+      }
+      if (event.shiftKey && key === 'd') { event.preventDefault(); setShowDiceRoller(true); return; }
+      if (!event.shiftKey && key === ',') { event.preventDefault(); setShowSettings(true); return; }
+      const tabs = { '1': 'levels', '2': 'spellbooks', '3': 'catalog', '4': 'feats', '5': 'items', '6': 'creatures' } as const;
+      if (!event.shiftKey && key in tabs) {
+        event.preventDefault();
+        const target = tabs[key as keyof typeof tabs];
+        if (target !== activeTab) requestTransition(() => setActiveTabValue(target));
+      }
+    };
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [activeTab]);
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (sheetGuard.current?.dirty) { event.preventDefault(); event.returnValue = ''; }
@@ -344,6 +408,29 @@ export const App: React.FC = () => {
     }
   }, [activeCharacter, refreshCharacters]);
 
+  const handleAddCreatureCompanion = useCallback(async (creature: CreatureItem) => {
+    if (!activeCharacter) throw new Error('No active character');
+    const records = await fetchCharacters() as SavedCharacterRecord[];
+    const character = records.find(record => record.id === activeCharacter.id);
+    if (!character) throw new Error('Character not found');
+    const data = JSON.parse(character.data_json || '{}');
+    const system = JSON.parse(creature.system_json || '{}') as { abilities?: Partial<Record<AttributeKey, { mod?: number }>>; skills?: Record<string, { base?: number }>; perception?: { senses?: Array<{ type?: string }> } };
+    const attributes = Object.fromEntries((['str', 'dex', 'con', 'int', 'wis', 'cha'] as const).map(key => [key, system.abilities?.[key]?.mod ?? 0])) as Record<AttributeKey, number>;
+    const skills: Partial<Record<SkillKey, number>> = {};
+    ALL_SKILLS.forEach(skill => { const value = system.skills?.[skill]?.base; if (typeof value === 'number') skills[skill] = value; });
+    const senses = system.perception?.senses || [];
+    const vision = senses.some(sense => sense.type === 'greater-darkvision') ? 'greater-darkvision' : senses.some(sense => sense.type === 'darkvision') ? 'darkvision' : senses.some(sense => sense.type === 'low-light-vision') ? 'low-light-vision' : 'normal';
+    const companion: CharacterCompanion = {
+      id: crypto.randomUUID(), name: creature.name, kind: 'animal', species: creature.name,
+      level: creature.level, size: creature.size || 'med', speed: creature.speed, vision, skills,
+      senses: creature.senses, currentHp: creature.hp, maxHp: creature.hp, ac: creature.ac,
+      fortitude: creature.fortitude, reflex: creature.reflex, will: creature.will, perception: creature.perception,
+      attributes, attacks: '', support: '', notes: '',
+    };
+    await saveCharacter({ id: character.id, name: character.name, level: character.level, ancestry: character.ancestry, heritage: character.heritage, background: character.background, class: character.class, subclass: character.subclass, data: { ...data, companions: [...(Array.isArray(data.companions) ? data.companions : []), companion] } });
+    await refreshCharacters();
+  }, [activeCharacter, refreshCharacters]);
+
   // Filtered saved characters for popover search
   const filteredSavedCharacters = useMemo(() => {
     if (!charSearchQuery.trim()) return savedCharacters;
@@ -399,6 +486,32 @@ export const App: React.FC = () => {
     setFilters((prev) => ({ ...prev, ...updates }));
   };
 
+  const refreshSpellCatalog = () => {
+    void fetchSpellMetadata().then(setMetadata).catch(console.error);
+    setFilters(previous => ({ ...previous, offset: 0 }));
+  };
+
+  const editSpell = async (spell: SpellItem) => {
+    setSpellWorking(true);
+    setSpellError('');
+    try { const full = await fetchSpellById(spell.id); setSelectedSpell(null); setSpellEditor({ spell: full }); }
+    catch { setSelectedSpell(null); setSpellError(t('catalogEditor.loadError')); }
+    finally { setSpellWorking(false); }
+  };
+
+  const removeSpell = async () => {
+    if (!spellDelete || spellWorking) return;
+    setSpellWorking(true);
+    setSpellError('');
+    try {
+      await deleteCatalogEntry('spell', spellDelete.id);
+      if (favorites.has(spellDelete.id)) toggleFavorite(spellDelete.id);
+      setSpellDelete(null);
+      refreshSpellCatalog();
+    } catch { setSpellDelete(null); setSpellError(t('catalogEditor.deleteError')); }
+    finally { setSpellWorking(false); }
+  };
+
   const handleResetFilters = () => {
     setFilters(INITIAL_FILTERS);
   };
@@ -419,7 +532,15 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className={`h-screen bg-canvas text-text-primary flex flex-col md:flex-row font-sans overflow-hidden ${isResizing ? 'select-none cursor-col-resize' : ''}`}>
+    <div
+      className={`app-shell h-screen bg-canvas text-text-primary flex flex-col md:flex-row font-sans overflow-hidden ${isResizing ? 'select-none cursor-col-resize' : ''}`}
+      style={theme === 'glass' && wallpaperImage ? {
+        backgroundImage: `linear-gradient(rgb(var(--bg-canvas) / 0.45), rgb(var(--bg-canvas) / 0.45)), url("${wallpaperImage}")`,
+        backgroundSize: wallpaperMode === 'tiled' ? 'auto' : 'cover',
+        backgroundRepeat: wallpaperMode === 'tiled' ? 'repeat' : 'no-repeat',
+        backgroundPosition: 'center',
+      } : undefined}
+    >
       {/* Mobile Top Header (Visible only on mobile) */}
       <div className="md:hidden flex items-center justify-between px-4 py-3 bg-surface border-b border-border-strong z-40 flex-shrink-0 print:hidden">
         <div className="flex items-center space-x-2.5">
@@ -441,7 +562,7 @@ export const App: React.FC = () => {
         {activeCharacter && (
           <div className="flex items-center space-x-2 text-xs">
             <span className="font-semibold text-white truncate max-w-[140px]">{activeCharacter.name}</span>
-            <span className="px-1.5 py-0.5 rounded bg-elevated text-accent-text font-bold text-[11px]">
+            <span className="px-1.5 py-0.5 rounded bg-elevated text-accent-text font-bold text-xs">
               {t('common.levelShort', { level: activeCharacter.level })}
             </span>
           </div>
@@ -461,7 +582,7 @@ export const App: React.FC = () => {
         style={{ width: isSidebarCollapsed ? '64px' : `${sidebarWidth}px` }}
         className={`
           fixed md:relative inset-y-0 left-0 z-50 print:hidden
-          bg-surface border-r border-border-strong
+          app-sidebar bg-surface border-r border-border-strong
           flex flex-col h-full transition-[width] duration-200 ease-in-out flex-shrink-0
           ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
         `}
@@ -565,6 +686,19 @@ export const App: React.FC = () => {
               <button onClick={() => { setActiveTab('creatures'); setIsMobileMenuOpen(false); }} className={`p-2.5 rounded-xl transition-all ${activeTab === 'creatures' ? 'bg-accent text-black shadow-md' : 'text-text-secondary hover:text-white hover:bg-elevated'}`} title={t('nav.creatures')} aria-label={t('nav.creatures')}>
                 <PawPrint className="w-5 h-5" />
               </button>
+              <button onClick={() => { setActiveTab('sources'); setIsMobileMenuOpen(false); }} className={`p-2.5 rounded-xl transition-all ${activeTab === 'sources' ? 'bg-accent text-black shadow-md' : 'text-text-secondary hover:text-white hover:bg-elevated'}`} title={t('sources.title')} aria-label={t('sources.title')}>
+                <Database className="w-5 h-5" />
+              </button>
+              <a
+                href="https://2e.aonprd.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-2.5 rounded-xl transition-all text-text-secondary hover:text-white hover:bg-elevated"
+                title={t('nav.archivesOfNethys')}
+                aria-label={t('nav.archivesOfNethys')}
+              >
+                <ExternalLink className="w-5 h-5" />
+              </a>
             </div>
 
             {/* Bottom: Dice Roller, Settings & Database Dot */}
@@ -593,7 +727,7 @@ export const App: React.FC = () => {
                   <h1 className="text-xs font-black tracking-tight text-white flex items-center gap-1.5 truncate">
                     PF2e Manager <span className="text-accent-text font-light">| {t('app.remaster')}</span>
                   </h1>
-                  <p className="text-[11px] text-text-muted truncate">{t('app.subtitle')}</p>
+                  <p className="text-xs text-text-muted truncate">{t('app.subtitle')}</p>
                 </div>
               </div>
               <div className="flex items-center space-x-1 flex-shrink-0">
@@ -658,7 +792,7 @@ export const App: React.FC = () => {
               <div className="p-3 bg-elevated border border-border-strong rounded-2xl shadow-md space-y-2.5">
                 {/* Header: Label */}
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] uppercase font-bold text-text-secondary tracking-wider flex items-center gap-1.5">
+                  <span className="text-xs uppercase font-bold text-text-secondary tracking-wider flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5 text-accent-text" />
                     <span>{t('app.activeCharacter')}</span>
                   </span>
@@ -696,7 +830,7 @@ export const App: React.FC = () => {
                         </div>
 
                         {/* Secondary: Level + ABC (Ancestry • Background • Class) */}
-                        <div className="flex items-center space-x-2 text-[11px] text-text-secondary truncate">
+                        <div className="flex items-center space-x-2 text-xs text-text-secondary truncate">
                           <span className="px-1.5 py-0.5 rounded font-black bg-elevated text-accent-text border border-border-strong flex-shrink-0">
                             {t('common.levelShort', { level: activeCharacter.level })}
                           </span>
@@ -718,7 +852,7 @@ export const App: React.FC = () => {
                     className="p-3 bg-surface hover:bg-elevated border border-dashed border-border-strong rounded-xl text-center cursor-pointer transition-colors"
                   >
                     <p className="text-xs text-text-secondary">{t('app.noActiveHero')}</p>
-                    <span className="text-[11px] text-accent-text font-semibold mt-0.5 block">
+                    <span className="text-xs text-accent-text font-semibold mt-0.5 block">
                       {t('app.clickToSelect')}
                     </span>
                   </div>
@@ -783,12 +917,12 @@ export const App: React.FC = () => {
                                     {c.name}
                                   </span>
                                   {isCurrent && (
-                                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-accent text-black font-black uppercase">
+                                    <span className="text-xs px-1.5 py-0.5 rounded bg-accent text-black font-black uppercase">
                                       {t('app.activeTag')}
                                     </span>
                                   )}
                                 </div>
-                                <span className="text-[11px] text-text-muted truncate block mt-0.5">
+                                <span className="text-xs text-text-muted truncate block mt-0.5">
                                   {t('common.levelShort', { level: c.level })} • {c.ancestry || t('common.ancestry')} • {c.class || t('common.class')}
                                 </span>
                               </div>
@@ -822,7 +956,7 @@ export const App: React.FC = () => {
             <nav className="flex-1 px-2.5 py-3 space-y-3.5 overflow-y-auto min-w-0">
               {/* Section: Ficha e Evolução */}
               <div className="space-y-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-text-muted px-2.5 block mb-1">
+                <span className="text-xs font-bold uppercase tracking-wider text-text-muted px-2.5 block mb-1">
                   {t('app.section.sheet')}
                 </span>
 
@@ -831,7 +965,7 @@ export const App: React.FC = () => {
                     setActiveTab('levels');
                     setIsMobileMenuOpen(false);
                   }}
-                  className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-bold transition-all text-left ${
+                  className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-base font-bold transition-all text-left ${
                     activeTab === 'levels'
                       ? 'bg-accent text-black shadow-md'
                       : 'text-text-secondary hover:text-white hover:bg-elevated'
@@ -839,7 +973,7 @@ export const App: React.FC = () => {
                   title={t('app.viewSheetManage')}
                 >
                   <FileText className="w-4 h-4 flex-shrink-0" />
-                  <span className="block truncate">{t('nav.sheet')}</span>
+                  <span className="min-w-0 line-clamp-2 leading-snug">{t('nav.sheet')}</span>
                 </button>
 
                 <button
@@ -847,20 +981,20 @@ export const App: React.FC = () => {
                     setActiveTab('spellbooks');
                     setIsMobileMenuOpen(false);
                   }}
-                  className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-bold transition-all text-left ${
+                  className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-base font-bold transition-all text-left ${
                     activeTab === 'spellbooks'
                       ? 'bg-accent text-black shadow-md'
                       : 'text-text-secondary hover:text-white hover:bg-elevated'
                   }`}
                 >
                   <Library className="w-4 h-4 flex-shrink-0" />
-                  <span className="block truncate">{t('nav.spellbooks')}</span>
+                  <span className="min-w-0 line-clamp-2 leading-snug">{t('nav.spellbooks')}</span>
                 </button>
               </div>
 
               {/* Section: Compêndios Remaster */}
               <div className="space-y-1 pt-2 border-t border-border-subtle">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-text-muted px-2.5 block mb-1">
+                <span className="text-xs font-bold uppercase tracking-wider text-text-muted px-2.5 block mb-1">
                   {t('app.section.compendia')}
                 </span>
 
@@ -869,14 +1003,14 @@ export const App: React.FC = () => {
                     setActiveTab('catalog');
                     setIsMobileMenuOpen(false);
                   }}
-                  className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-bold transition-all text-left ${
+                  className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-base font-bold transition-all text-left ${
                     activeTab === 'catalog'
                       ? 'bg-accent text-black shadow-md'
                       : 'text-text-secondary hover:text-white hover:bg-elevated'
                   }`}
                 >
                   <Search className="w-4 h-4 flex-shrink-0" />
-                  <span className="block truncate">{t('nav.spells')}</span>
+                  <span className="min-w-0 line-clamp-2 leading-snug">{t('nav.spells')}</span>
                 </button>
 
                 <button
@@ -884,34 +1018,48 @@ export const App: React.FC = () => {
                     setActiveTab('feats');
                     setIsMobileMenuOpen(false);
                   }}
-                  className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-bold transition-all text-left ${
+                  className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-base font-bold transition-all text-left ${
                     activeTab === 'feats'
                       ? 'bg-accent text-black shadow-md'
                       : 'text-text-secondary hover:text-white hover:bg-elevated'
                   }`}
                 >
                   <Award className="w-4 h-4 flex-shrink-0" />
-                  <span className="block truncate">{t('nav.feats')}</span>
+                  <span className="min-w-0 line-clamp-2 leading-snug">{t('nav.feats')}</span>
                 </button>
-                <button onClick={() => { setActiveTab('items'); setIsMobileMenuOpen(false); }} className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-bold transition-all text-left ${activeTab === 'items' ? 'bg-accent text-black shadow-md' : 'text-text-secondary hover:text-white hover:bg-elevated'}`}>
+                <button onClick={() => { setActiveTab('items'); setIsMobileMenuOpen(false); }} className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-base font-bold transition-all text-left ${activeTab === 'items' ? 'bg-accent text-black shadow-md' : 'text-text-secondary hover:text-white hover:bg-elevated'}`}>
                   <Package className="w-4 h-4 flex-shrink-0" />
-                  <span className="block truncate">{t('nav.items')}</span>
+                  <span className="min-w-0 line-clamp-2 leading-snug">{t('nav.items')}</span>
                 </button>
-                <button onClick={() => { setActiveTab('creatures'); setIsMobileMenuOpen(false); }} className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-bold transition-all text-left ${activeTab === 'creatures' ? 'bg-accent text-black shadow-md' : 'text-text-secondary hover:text-white hover:bg-elevated'}`}>
+                <button onClick={() => { setActiveTab('creatures'); setIsMobileMenuOpen(false); }} className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-base font-bold transition-all text-left ${activeTab === 'creatures' ? 'bg-accent text-black shadow-md' : 'text-text-secondary hover:text-white hover:bg-elevated'}`}>
                   <PawPrint className="w-4 h-4 flex-shrink-0" />
-                  <span className="block truncate">{t('nav.creatures')}</span>
+                  <span className="min-w-0 line-clamp-2 leading-snug">{t('nav.creatures')}</span>
                 </button>
+                <button onClick={() => { setActiveTab('sources'); setIsMobileMenuOpen(false); }} className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-base font-bold transition-all text-left ${activeTab === 'sources' ? 'bg-accent text-black shadow-md' : 'text-text-secondary hover:text-white hover:bg-elevated'}`}>
+                  <Database className="w-4 h-4 flex-shrink-0" />
+                  <span className="min-w-0 line-clamp-2 leading-snug">{t('sources.title')}</span>
+                </button>
+                <a
+                  href="https://2e.aonprd.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-base font-bold transition-all text-left text-text-secondary hover:text-white hover:bg-elevated"
+                >
+                  <ExternalLink className="w-4 h-4 flex-shrink-0" />
+                  <span className="min-w-0 line-clamp-2 leading-snug">{t('nav.archivesOfNethys')}</span>
+                </a>
               </div>
             </nav>
 
             {/* Database Footer Status */}
             <div className="p-3 border-t border-border-strong bg-canvas space-y-1">
-              <div className="flex items-center space-x-2 text-[11px] text-text-secondary">
+              <div className="flex items-center space-x-2 text-xs text-text-secondary">
                 <Database className="w-3.5 h-3.5 text-status-success flex-shrink-0" />
                 <span className="font-semibold text-white">pf2e.db</span>
               </div>
               {portraitDb === 'portraitdb' && (
-                <div className="flex items-center space-x-2 text-[11px] text-text-secondary">
+                <div className="flex items-center space-x-2 text-xs text-text-secondary">
                   <ImageIcon className="w-3.5 h-3.5 text-status-success flex-shrink-0" />
                   <span className="font-semibold text-white">portraitdb</span>
                 </div>
@@ -937,7 +1085,7 @@ export const App: React.FC = () => {
         ref={mainRef}
         onScroll={(e) => setShowScrollTop(e.currentTarget.scrollTop > 300)}
         style={wallpaperImage ? {
-          backgroundImage: `linear-gradient(rgb(var(--bg-canvas) / 0.72), rgb(var(--bg-canvas) / 0.72)), url("${wallpaperImage}")`,
+          backgroundImage: `linear-gradient(rgb(var(--bg-canvas) / ${theme === 'glass' ? '0.45' : '0.72'}), rgb(var(--bg-canvas) / ${theme === 'glass' ? '0.45' : '0.72'})), url("${wallpaperImage}")`,
           backgroundSize: wallpaperMode === 'tiled' ? 'auto' : 'cover',
           backgroundRepeat: wallpaperMode === 'tiled' ? 'repeat' : 'no-repeat',
           backgroundPosition: 'center',
@@ -945,9 +1093,11 @@ export const App: React.FC = () => {
         className="flex-1 h-full overflow-y-auto bg-canvas flex flex-col print:h-auto print:overflow-visible print:bg-white print:text-black"
       >
         <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 flex-1">
+          {spellError && <p role="alert" className="rounded-lg border border-status-danger-border bg-status-danger-bg p-3 text-status-danger">{spellError}</p>}
           {activeTab === 'creator' ? (
             /* ABC CHARACTER CREATION WIZARD */
             <CharacterCreatorView
+              allowExtraAttributes={extraAttributesOption}
               onGuardChange={onGuardChange}
               onNavigateToLevels={() => {
                 setLevelsInitialTab('progression');
@@ -967,6 +1117,8 @@ export const App: React.FC = () => {
               theme={theme}
               onThemeChange={setTheme}
               hpMode={hpMode}
+              defaultFreeArchetype={freeArchetypeOption}
+              pdfTemplate={pdfTemplate}
               onGuardChange={onGuardChange}
               onNavigateToCreator={() => setActiveTab('creator')}
               onCharacterSelected={(char) => setActiveCharId(char.id)}
@@ -975,14 +1127,16 @@ export const App: React.FC = () => {
             />
           ) : activeTab === 'feats' ? (
             /* FEATS EXPLORER VIEW (7,213 FEATS) */
-            <FeatExplorerView />
+            <FeatExplorerView characterLevel={activeCharacter?.level} />
           ) : activeTab === 'items' ? (
             <EquipmentExplorerView
               activeCharacterName={activeCharacter?.name}
               onAddToInventory={activeCharacter ? handleAddEquipmentToActiveChar : undefined}
             />
           ) : activeTab === 'creatures' ? (
-            <CreatureCompendiumView />
+            <CreatureCompendiumView activeCharacterName={activeCharacter?.name} onAddCompanion={activeCharacter ? handleAddCreatureCompanion : undefined} />
+          ) : activeTab === 'sources' ? (
+            <SourcesView />
           ) : activeTab === 'spellbooks' ? (
             /* SPELLBOOK BUILDER VIEW (66% / 33% SPLIT) */
             <SpellbookBuilderView
@@ -993,6 +1147,7 @@ export const App: React.FC = () => {
           ) : (
             /* SPELL CATALOG SEARCH VIEW */
             <>
+              <div className="flex justify-end"><button type="button" onClick={() => setSpellEditor({ spell: null })} className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 font-semibold text-accent-contrast"><Plus className="w-4 h-4" />{t('catalogEditor.newSpell')}</button></div>
               <SpellFiltersBar
                 filters={filters}
                 onChange={handleFilterChange}
@@ -1029,7 +1184,7 @@ export const App: React.FC = () => {
                   </button>
                 </div>
               ) : viewMode === 'grid' ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                <div className="compendium-cards">
                   {spells.map((spell) => (
                     <SpellCard
                       key={spell.id}
@@ -1108,6 +1263,12 @@ export const App: React.FC = () => {
           onPortraitDbChange={setPortraitDb}
           hpMode={hpMode}
           onHpModeChange={setHpMode}
+          freeArchetype={freeArchetypeOption}
+          onFreeArchetypeChange={setFreeArchetypeOption}
+          extraAttributes={extraAttributesOption}
+          onExtraAttributesChange={setExtraAttributesOption}
+          pdfTemplate={pdfTemplate}
+          onPdfTemplateChange={setPdfTemplate}
           wallpaperImage={wallpaperImage}
           onWallpaperImageChange={setWallpaperImage}
           wallpaperMode={wallpaperMode}
@@ -1134,6 +1295,8 @@ export const App: React.FC = () => {
       )}
 
       {/* Spell Detail Modal with Icon Picker */}
+      {spellEditor && <CatalogEditorModal kind="spell" entry={spellEditor.spell} onClose={() => setSpellEditor(null)} onSaved={() => { setSpellEditor(null); refreshSpellCatalog(); }} />}
+      {spellDelete && <ConfirmDialog title={t('catalogEditor.deleteSpell')} message={t('catalogEditor.deleteConfirm', { name: spellDelete.name })} variant="danger" confirmLabel={t('common.remove')} onCancel={() => { setSelectedSpell(spellDelete); setSpellDelete(null); }} onConfirm={() => { void removeSpell(); }} />}
       {selectedSpell && (
         <SpellDetailModal
           spell={selectedSpell}
@@ -1143,6 +1306,8 @@ export const App: React.FC = () => {
           onClose={() => setSelectedSpell(null)}
           onSelectTrait={handleSelectTrait}
           characterLevel={activeCharacter?.level}
+          onEdit={spellWorking || activeTab !== 'catalog' ? undefined : () => { void editSpell(selectedSpell); }}
+          onDelete={spellWorking || activeTab !== 'catalog' ? undefined : () => { setSpellDelete(selectedSpell); setSelectedSpell(null); }}
         />
       )}
     </div>

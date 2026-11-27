@@ -39,7 +39,7 @@ import {
 import { APPEARANCE_FIELDS, CharacterAppearance, CharacterDetails } from '../utils/characterDetails';
 import { calculateWeaponStrike } from '../utils/strikeCalculation';
 import { calculateArmorClass } from '../utils/armor';
-import { applyFeatSkillEffects, evaluatePrerequisites, RuleContext } from '../utils/featRules';
+import { applyFeatSkillEffects, evaluatePrerequisites, extractFeatSkillGrants, RuleContext } from '../utils/featRules';
 import { ProgressionChoiceCatalog, ProgressionChoiceResolution } from '../utils/progressionChoices';
 import { ProficiencySelector } from './ProficiencySelector';
 import { StrikesView } from './StrikesView';
@@ -47,15 +47,18 @@ import { InventoryView } from './InventoryView';
 import { FeatPickerModal } from './FeatPickerModal';
 import { ThemeName } from './SettingsModal';
 import { ConfirmDialog } from './ConfirmDialog';
+import { DiceRollerModal } from './DiceRollerModal';
 import { IconButton } from './IconButton';
 import { SessionCombatPanel } from './SessionCombatPanel';
 import { CompanionView } from './CompanionView';
 import { PortraitPickerModal } from './PortraitPickerModal';
+import { PsychicMindSelector } from './PsychicMindSelector';
 import { resolvePortraitSrc } from '../utils/portrait';
 import { exportCharacterToFillablePdf } from '../utils/pf2ePdfExport';
 import { DEFAULT_SESSION_STATE, SessionState, computeConditionPenalties } from '../utils/conditions';
 import { computeInitialSkillBudget, deriveDefaultLoreSkills } from '../utils/skills';
 import { SpellsSheetTab, deriveDefaultSpellcasting } from './SpellsSheetTab';
+import { PSYCHIC_MIND_ATTRIBUTES, advancePsychicSlots, psychicSlotsForLevel } from '../utils/psychic';
 import { useI18n } from '../i18n/I18nContext';
 import { TranslateFn } from '../i18n/Translator';
 import { attributeName, attributeShort, skillName, proficiencyWithBonus, proficiencyShort, proficiencyName, signed } from '../i18n/gameTerms';
@@ -63,7 +66,6 @@ import {
   Shield, 
   Heart, 
   Award, 
-  Sparkles, 
   BookOpen, 
   User, 
   Check, 
@@ -76,6 +78,8 @@ import {
   Zap,
   Footprints,
   Eye,
+  BicepsFlexed,
+  Brain,
   ArrowUpCircle,
   ArrowDownCircle,
   FileDown,
@@ -93,6 +97,8 @@ interface LevelProgressionViewProps {
   theme: ThemeName;
   onThemeChange: (theme: ThemeName) => void;
   hpMode?: HpProgressionMode;
+  defaultFreeArchetype?: boolean;
+  pdfTemplate?: 'standard' | 'master';
   onGuardChange?: (guard: SheetGuard | null) => void;
   activeCharId?: string | null;
   onNavigateToCreator?: () => void;
@@ -207,6 +213,30 @@ function getFeatSlotsForLevel(
   return slots;
 }
 
+function parseAncestryLanguageInfo(ancestry: AncestryItem | null): { fixed: string[]; extraCount: number } {
+  if (!ancestry) return { fixed: [], extraCount: 0 };
+  let fixed: string[] = [];
+  let extraCount = 0;
+  try {
+    const raw = JSON.parse(ancestry.languages || '{}') as { value?: unknown[]; custom?: string };
+    if (Array.isArray(raw.value)) {
+      fixed = raw.value
+        .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+        .map(item => item.trim().replace(/^[a-z]/, c => c.toUpperCase()));
+    }
+    if (typeof raw.custom === 'string' && raw.custom.trim()) {
+      fixed.push(...raw.custom.split(',').map(s => s.trim()).filter(Boolean));
+    }
+  } catch { /* ignore */ }
+  try {
+    const sys = JSON.parse(ancestry.system_json || '{}') as { additionalLanguages?: { count?: number } };
+    if (typeof sys.additionalLanguages?.count === 'number' && sys.additionalLanguages.count > 0) {
+      extraCount = sys.additionalLanguages.count;
+    }
+  } catch { /* ignore */ }
+  return { fixed, extraCount };
+}
+
 function maxSkillRankForLevel(level: number): ProficiencyRank {
   if (level >= 15) return 4;
   if (level >= 7) return 3;
@@ -259,6 +289,8 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
   theme,
   onThemeChange,
   hpMode = 'full',
+  defaultFreeArchetype = false,
+  pdfTemplate = 'standard',
   onGuardChange,
   onNavigateToCreator,
   onCharacterSelected,
@@ -285,6 +317,8 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
   const [visionOverride, setVisionOverride] = useState<VisionType | ''>('');
   const [visionRange, setVisionRange] = useState('');
   const [senses, setSenses] = useState('');
+  const [languages, setLanguages] = useState('');
+  const [newLanguage, setNewLanguage] = useState('');
   const [appearance, setAppearance] = useState<CharacterAppearance>(() => CharacterDetails.parseAppearance(null));
   const [xp, setXp] = useState(0);
   const [portrait, setPortrait] = useState<string | undefined>(undefined);
@@ -297,12 +331,19 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     }
   }, [initialSheetTab, onInitialSheetTabConsumed]);
   const [freeArchetype, setFreeArchetype] = useState(false);
+  const effectiveFreeArchetype = freeArchetype || defaultFreeArchetype;
   const [charName, setCharName] = useState<string>(() => t('sheet.defaultCharacterName'));
   const [selectedAncestry, setSelectedAncestry] = useState<AncestryItem | null>(null);
   const [selectedHeritage, setSelectedHeritage] = useState<HeritageItem | null>(null);
   const [selectedBackground, setSelectedBackground] = useState<BackgroundItem | null>(null);
   const [selectedClass, setSelectedClass] = useState<ClassItem | null>(null);
   const [subclass, setSubclass] = useState('');
+  const [psychicConsciousMind, setPsychicConsciousMind] = useState('');
+  const [checkRoll, setCheckRoll] = useState<{ label: string; formula: string } | null>(null);
+  const rollCheck = (label: string, modifier: number) => {
+    const formula = modifier >= 0 ? `1d20+${modifier}` : `1d20${modifier}`;
+    setCheckRoll({ label, formula });
+  };
   const [choiceCatalog, setChoiceCatalog] = useState<ProgressionChoiceCatalog | null>(null);
   const [choiceCatalogError, setChoiceCatalogError] = useState(false);
   const [choiceCatalogAttempt, setChoiceCatalogAttempt] = useState(0);
@@ -492,20 +533,29 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
       setVisionOverride(typeof parsed.visionOverride === 'string' ? (parsed.visionOverride as VisionType | '') : '');
       setVisionRange(typeof parsed.visionRange === 'string' ? parsed.visionRange : '');
       setSenses(typeof parsed.senses === 'string' ? parsed.senses : '');
+      const cs = parsed.charState || {};
+      const savedLangs = typeof parsed.languages === 'string' ? parsed.languages.trim() : '';
+      setLanguages(savedLangs || parseAncestryLanguageInfo(cs.ancestry || null).fixed.join(', '));
+      setNewLanguage('');
       setAppearance(CharacterDetails.parseAppearance(parsed.appearance));
       setXp(CharacterDetails.parseXp(parsed.xp));
       setFreeArchetype(parsed.freeArchetype === true);
       setStrikes(Array.isArray(parsed.strikes) ? parsed.strikes : []);
       setInventory({ items: Array.isArray(parsed.inventory?.items) ? parsed.inventory.items : [], coins: { pp: 0, gp: 0, sp: 0, cp: 0, ...parsed.inventory?.coins } });
-      setSession(parsed.session ? { ...DEFAULT_SESSION_STATE, ...parsed.session, conditions: { ...DEFAULT_SESSION_STATE.conditions, ...parsed.session?.conditions } } : DEFAULT_SESSION_STATE);
-
-      const cs = parsed.charState || {};
+      const psychic = (cs.selectedClass?.slug || cs.selectedClass?.name || '').toLowerCase() === 'psychic';
+      const loadedSession = parsed.session ? { ...DEFAULT_SESSION_STATE, ...parsed.session, conditions: { ...DEFAULT_SESSION_STATE.conditions, ...parsed.session?.conditions } } : { ...DEFAULT_SESSION_STATE };
+      if (psychic && !loadedSession.maxFocusPoints) {
+        loadedSession.maxFocusPoints = 2;
+        if (!parsed.session) loadedSession.focusPoints = 2;
+      }
+      setSession(loadedSession);
       originalCharState.current = cs;
       setSelectedAncestry(cs.ancestry || null);
       setSelectedHeritage(cs.heritage || null);
       setSelectedBackground(cs.background || null);
       setSelectedClass(cs.selectedClass || null);
       setSubclass(rec.subclass || '');
+      setPsychicConsciousMind(typeof cs.psychicConsciousMind === 'string' ? cs.psychicConsciousMind : '');
       setActiveSlotModal(null);
 
       const ca = parsed.calculatedAttributes || {};
@@ -520,63 +570,160 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
       setBaseAttributes(newBase);
 
       setLevelData(parsed.progressionLevels ? { ...emptyLevels, ...parsed.progressionLevels } : emptyLevels);
-      setInitialTrainedSkills(Array.isArray(parsed.initialTrainedSkills) ? new Set(parsed.initialTrainedSkills) : new Set());
-      setLoreSkills(
-        Array.isArray(parsed.loreSkills)
-          ? parsed.loreSkills
-          : deriveDefaultLoreSkills(cs.background || null, cs.selectedClass || null)
-      );
-      setSpellcasting(
-        parsed.spellcasting
-          ? parsed.spellcasting
-          : deriveDefaultSpellcasting(cs.selectedClass || null, rec.level || 1)
-      );
+      const savedSkills = Array.isArray(parsed.initialTrainedSkills) ? parsed.initialTrainedSkills : [];
+      const recoveredSkills = savedSkills.length ? savedSkills : [
+        ...computeInitialSkillBudget(cs.background || null, cs.selectedClass || null, newBase.int).autoTrained,
+        ...(Array.isArray(cs.selectedSkills) ? cs.selectedSkills : []),
+      ];
+      setInitialTrainedSkills(new Set(recoveredSkills.filter((skill: unknown): skill is SkillKey => typeof skill === 'string' && ALL_SKILLS.includes(skill as SkillKey))));
+      const defaultLore = deriveDefaultLoreSkills(cs.background || null, cs.selectedClass || null);
+      const savedLore = Array.isArray(parsed.loreSkills) ? parsed.loreSkills as LoreSkillEntry[] : null;
+      setLoreSkills(savedLore && savedLore.length > 0 ? savedLore : defaultLore);
+      const loadedSpellcasting = parsed.spellcasting || deriveDefaultSpellcasting(cs.selectedClass || null, rec.level || 1);
+      if (psychic) {
+        if (!parsed.spellcasting && (cs.classKeyAttributeChoice === 'int' || cs.classKeyAttributeChoice === 'cha')) loadedSpellcasting.ability = cs.classKeyAttributeChoice;
+        loadedSpellcasting.slotsMax = { ...psychicSlotsForLevel(rec.level || 1), ...loadedSpellcasting.slotsMax };
+      }
+      setSpellcasting(loadedSpellcasting);
     } catch (e) {
       console.error('Erro ao carregar registro salvo:', e);
     }
   };
 
+  const choiceKindsPresent = new Set(
+    Object.values(levelData).flatMap(data =>
+      Object.values(data.feats || {}).map(feat => ProgressionChoiceCatalog.definition(feat)?.kind).filter(Boolean)
+    )
+  );
+  const needsOracleCatalog = choiceKindsPresent.has('mystery');
+  const needsPatronCatalog = choiceKindsPresent.has('patron');
+  const needsBloodlineCatalog = choiceKindsPresent.has('bloodline');
+  const needsMindCatalog = choiceKindsPresent.has('consciousMind');
+  const needsMuseCatalog = choiceKindsPresent.has('muse');
+  const needsSwashbucklerCatalog = choiceKindsPresent.has('swashbucklerStyle');
+  const needsSkillFeatCatalog = choiceKindsPresent.has('skillFeat');
+  const needsInstinctCatalog = choiceKindsPresent.has('instinct');
+  const needsCauseCatalog = choiceKindsPresent.has('cause');
+  const needsWayCatalog = choiceKindsPresent.has('way');
+  const needsInnovationCatalog = choiceKindsPresent.has('innovation');
+  const needsImplementCatalog = choiceKindsPresent.has('implement');
+  const needsKineticGateCatalog = choiceKindsPresent.has('kineticGate');
   const needsChoiceCatalog = (selectedClass?.slug || selectedClass?.name || '').toLowerCase() === 'druid'
-    || Object.values(levelData).some(data => Object.values(data.feats || {}).some(feat => ProgressionChoiceCatalog.definition(feat)));
+    || choiceKindsPresent.size > 0;
 
   useEffect(() => {
-    if (!needsChoiceCatalog || choiceCatalog) return;
+    const requiredTraits = Object.values(levelData).flatMap(data => Object.values(data.feats || {}).map(feat => ProgressionChoiceCatalog.definition(feat)?.trait)).filter((trait): trait is string => !!trait);
+    const hasMissingTagOptions = (needsPatronCatalog && !choiceCatalog?.tagOptions.patron?.length)
+      || (needsBloodlineCatalog && !choiceCatalog?.tagOptions.bloodline?.length)
+      || (needsMindCatalog && !choiceCatalog?.tagOptions.consciousMind?.length)
+      || (needsMuseCatalog && !choiceCatalog?.tagOptions.muse?.length)
+      || (needsSwashbucklerCatalog && !choiceCatalog?.tagOptions.swashbucklerStyle?.length)
+      || (needsInstinctCatalog && !choiceCatalog?.tagOptions.instinct?.length)
+      || (needsCauseCatalog && !choiceCatalog?.tagOptions.cause?.length)
+      || (needsWayCatalog && !choiceCatalog?.tagOptions.way?.length)
+      || (needsInnovationCatalog && !choiceCatalog?.tagOptions.innovation?.length)
+      || (needsImplementCatalog && !choiceCatalog?.tagOptions.implement?.length)
+      || (needsKineticGateCatalog && !choiceCatalog?.tagOptions.kineticGate?.length)
+      || (needsSkillFeatCatalog && !choiceCatalog?.skillFeats.length);
+    if (!needsChoiceCatalog || (choiceCatalog && (!needsOracleCatalog || choiceCatalog.mysteries.length > 0) && !hasMissingTagOptions && requiredTraits.every(trait => choiceCatalog.loadedTraits.includes(trait)))) return;
     let cancelled = false;
     setChoiceCatalogError(false);
     const filters = { search: '', level: 'all', action_type: 'all', actions: 'all', rarity: 'all', trait: 'druid', limit: 200, offset: 0 };
+    const classTrait = (selectedClass?.slug || selectedClass?.name || '').toLowerCase();
+    const extraTraits = new Set(Object.values(levelData).flatMap(data => Object.values(data.feats || {}).map(feat => ProgressionChoiceCatalog.definition(feat)?.trait)).filter((trait): trait is string => !!trait && trait !== 'druid'));
+    const emptyFeats = Promise.resolve({ feats: [] as FeatItem[], total: 0 });
     Promise.all([
       fetchFeats({ ...filters, category: 'classfeature', level: '1' }),
       fetchFeats({ ...filters, category: 'class', max_level: '2' }),
-    ]).then(async ([features, feats]) => {
-      if (features.total > features.feats.length || feats.total > feats.feats.length) throw new Error('Incomplete druid choice catalog');
+      classTrait ? fetchFeats({ ...filters, trait: classTrait, category: 'class', level: '1' }) : emptyFeats,
+      needsOracleCatalog ? fetchFeats({ ...filters, trait: 'oracle', category: 'classfeature', level: '1' }) : emptyFeats,
+      needsPatronCatalog ? fetchFeats({ ...filters, trait: 'witch', category: 'classfeature', level: '1' }) : emptyFeats,
+      needsBloodlineCatalog ? fetchFeats({ ...filters, trait: 'sorcerer', category: 'classfeature', level: '1' }) : emptyFeats,
+      needsMindCatalog ? fetchFeats({ ...filters, trait: 'psychic', category: 'classfeature', level: '1' }) : emptyFeats,
+      needsMuseCatalog ? fetchFeats({ ...filters, trait: 'bard', category: 'classfeature', level: '1' }) : emptyFeats,
+      needsSwashbucklerCatalog ? fetchFeats({ ...filters, trait: 'swashbuckler', category: 'classfeature', level: '1' }) : emptyFeats,
+      needsInstinctCatalog ? fetchFeats({ ...filters, trait: 'barbarian', category: 'classfeature', level: '1' }) : emptyFeats,
+      needsCauseCatalog ? fetchFeats({ ...filters, trait: 'champion', category: 'classfeature', level: '1' }) : emptyFeats,
+      needsWayCatalog ? fetchFeats({ ...filters, trait: 'gunslinger', category: 'classfeature', level: '1' }) : emptyFeats,
+      needsInnovationCatalog ? fetchFeats({ ...filters, trait: 'inventor', category: 'classfeature', level: '1' }) : emptyFeats,
+      needsImplementCatalog ? fetchFeats({ ...filters, trait: 'thaumaturge', category: 'classfeature', level: '1' }) : emptyFeats,
+      needsKineticGateCatalog ? fetchFeats({ ...filters, trait: 'kineticist', category: 'classfeature', level: '1' }) : emptyFeats,
+      needsSkillFeatCatalog ? fetchFeats({ ...filters, trait: 'all', category: 'skill', level: 'all', limit: 500 }) : emptyFeats,
+      ...[...extraTraits].map(trait => fetchFeats({ ...filters, trait, category: 'class', max_level: '2' })),
+    ]).then(async ([features, feats, classFeats, oracleFeatures, witchFeatures, sorcererFeatures, psychicFeatures, bardFeatures, swashbucklerFeatures, barbarianFeatures, championFeatures, gunslingerFeatures, inventorFeatures, thaumaturgeFeatures, kineticistFeatures, skillFeatResult, ...extraFeats]) => {
+      if ([features, feats, classFeats, oracleFeatures, witchFeatures, sorcererFeatures, psychicFeatures, bardFeatures, swashbucklerFeatures, barbarianFeatures, championFeatures, gunslingerFeatures, inventorFeatures, thaumaturgeFeatures, kineticistFeatures, skillFeatResult, ...extraFeats].some(result => result.total > result.feats.length)) {
+        throw new Error('Incomplete choice catalog');
+      }
       const orders = features.feats.filter(ProgressionChoiceCatalog.isOrder);
+      const mysteries = oracleFeatures.feats.filter(ProgressionChoiceCatalog.isMystery).sort((a, b) => a.name.localeCompare(b.name));
       const grantsById = new Map(feats.feats.map(feat => [feat.id, feat]));
-      const missingIds = new Set(orders.map(order => ProgressionChoiceCatalog.orderGrantId(order))
-        .filter((id): id is string => !!id && !grantsById.has(id)));
+      const missingIds = new Set([
+        ...orders.map(order => ProgressionChoiceCatalog.orderGrantId(order)),
+        ...mysteries.map(mystery => ProgressionChoiceCatalog.mysteryCurseId(mystery)),
+        ...(needsOracleCatalog ? [ProgressionChoiceCatalog.oracularCurseId] : []),
+        ...(needsSwashbucklerCatalog ? [ProgressionChoiceCatalog.panacheId, ProgressionChoiceCatalog.stylishCombatantId] : []),
+        ...(needsSkillFeatCatalog ? [ProgressionChoiceCatalog.surpriseAttackId] : []),
+        ...(needsInnovationCatalog ? [ProgressionChoiceCatalog.inventorSkillFeatId] : []),
+      ].filter((id): id is string => !!id && !grantsById.has(id)));
       const fetchedGrants = await Promise.all([...missingIds].map(fetchFeatById));
       fetchedGrants.forEach(feat => grantsById.set(feat.id, feat));
       if (cancelled) return;
-      setChoiceCatalog(new ProgressionChoiceCatalog(orders.map(item => ({
-        item, grant: grantsById.get(ProgressionChoiceCatalog.orderGrantId(item) || ''),
-      })), feats.feats));
+      const byTag = (items: FeatItem[], tag: string) =>
+        items.filter(item => ProgressionChoiceCatalog.hasOtherTag(item, tag)).sort((a, b) => a.name.localeCompare(b.name));
+      setChoiceCatalog(new ProgressionChoiceCatalog(
+        orders.map(item => ({
+          item, grant: grantsById.get(ProgressionChoiceCatalog.orderGrantId(item) || ''),
+        })),
+        [...new Map([...feats.feats, ...classFeats.feats, ...extraFeats.flatMap(result => result.feats)].map(feat => [feat.id, feat])).values()],
+        classTrait,
+        ['druid', ...extraTraits],
+        mysteries.map(item => ({
+          item, curse: grantsById.get(ProgressionChoiceCatalog.mysteryCurseId(item) || ''),
+        })),
+        grantsById.get(ProgressionChoiceCatalog.oracularCurseId),
+        {
+          patron: byTag(witchFeatures.feats, 'witch-patron'),
+          bloodline: byTag(sorcererFeatures.feats, 'sorcerer-bloodline'),
+          consciousMind: byTag(psychicFeatures.feats, 'psychic-conscious-mind'),
+          muse: byTag(bardFeatures.feats, 'bard-muse'),
+          swashbucklerStyle: byTag(swashbucklerFeatures.feats, 'swashbuckler-style'),
+          instinct: byTag(barbarianFeatures.feats, 'barbarian-instinct'),
+          cause: byTag(championFeatures.feats, 'champion-cause'),
+          way: byTag(gunslingerFeatures.feats, 'gunslinger-way'),
+          innovation: byTag(inventorFeatures.feats, 'inventor-innovation'),
+          implement: byTag(thaumaturgeFeatures.feats, 'thaumaturge-implement'),
+          kineticGate: byTag(kineticistFeatures.feats, 'kineticist-kinetic-gate'),
+        },
+        [...skillFeatResult.feats].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)),
+        Object.fromEntries(grantsById),
+      ));
     }).catch(() => { if (!cancelled) setChoiceCatalogError(true); });
     return () => { cancelled = true; };
-  }, [needsChoiceCatalog, choiceCatalog, choiceCatalogAttempt]);
+  }, [needsChoiceCatalog, needsOracleCatalog, needsPatronCatalog, needsBloodlineCatalog, needsMindCatalog, needsMuseCatalog, needsSwashbucklerCatalog, needsInstinctCatalog, needsCauseCatalog, needsWayCatalog, needsInnovationCatalog, needsImplementCatalog, needsKineticGateCatalog, needsSkillFeatCatalog, choiceCatalog, choiceCatalogAttempt, selectedClass, levelData]);
 
   const isDruid = (selectedClass?.slug || selectedClass?.name || '').toLowerCase() === 'druid';
   const initialFeat = levelData[1]?.feats?.order_1;
   const initialOrder = isDruid ? choiceCatalog?.initialOrder(subclass, initialFeat) : undefined;
+  const initialOrderSkill = useMemo(() => {
+    for (const rule of ProgressionChoiceCatalog.rules(initialOrder?.item.system_json)) {
+      const entry = rule as { key?: string; mode?: string; path?: string; value?: unknown };
+      const match = entry.key === 'ActiveEffectLike' && entry.mode === 'upgrade' && entry.value === 1 && typeof entry.path === 'string' ? /^system\.skills\.([a-z]+)\.rank$/.exec(entry.path) : null;
+      if (match && ALL_SKILLS.includes(match[1] as SkillKey)) return match[1] as SkillKey;
+    }
+    return undefined;
+  }, [initialOrder]);
   const matchingInitialOrders = choiceCatalog?.orders.filter(order => order.grant?.id === initialFeat?.featId) || [];
   const resolvedSubclass = initialOrder?.item.name || subclass;
   const choiceResolution = useMemo(() => {
     if (!choiceCatalog) return null;
     return new ProgressionChoiceResolution(choiceCatalog, levelData, initialOrder?.item.id, (level, excludedSlot, grants) => {
       const skills = Object.fromEntries(ALL_SKILLS.map(skill => [skill, initialTrainedSkills.has(skill) ? 1 : 0])) as Record<SkillKey, ProficiencyRank>;
+      if (initialOrderSkill) skills[initialOrderSkill] = Math.max(skills[initialOrderSkill], 1) as ProficiencyRank;
       for (let current = 1; current <= level; current++) {
         Object.entries(levelData[current]?.feats || {}).forEach(([slot, feat]) => {
-          if (slot !== `order_explorer_${current}` && (current !== level || slot !== excludedSlot)) applyFeatSkillEffects(feat, skills);
+          if (slot !== `order_explorer_${current}` && (current !== level || slot !== excludedSlot)) applyFeatSkillEffects(feat, skills, level);
         });
-        grants.filter(grant => grant.level === current).forEach(grant => applyFeatSkillEffects(grant.feat, skills));
+        grants.filter(grant => grant.level === current).forEach(grant => applyFeatSkillEffects(grant.feat, skills, level));
         (levelData[current]?.skillIncreases || []).forEach(skill => {
           if (skills[skill] < maxSkillRankForLevel(current)) skills[skill] = (skills[skill] + 1) as ProficiencyRank;
         });
@@ -584,7 +731,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
       }
       return { attributes: computeAttributesAtLevel(baseAttributes, levelData, level).mods, skills };
     }, isDruid);
-  }, [choiceCatalog, levelData, initialOrder, initialTrainedSkills, baseAttributes, isDruid]);
+  }, [choiceCatalog, levelData, initialOrder, initialOrderSkill, initialTrainedSkills, baseAttributes, isDruid]);
 
   const levelsForSave = useMemo(() => {
     if (!choiceResolution) return levelData;
@@ -658,9 +805,108 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
   // Active Level for calculations (in progression tab uses inspectLevel; otherwise character's official level)
   const activeLevel = sheetTab === 'progression' ? inspectLevel : currentLevel;
 
+  const [classProficiencyFeatures, setClassProficiencyFeatures] = useState<{ level: number; item: FeatItem }[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    setClassProficiencyFeatures([]);
+    try {
+      const system = JSON.parse(selectedClass?.system_json || '{}') as { items?: Record<string, { level?: number; uuid?: string }> };
+      const features = Object.values(system.items || {}).flatMap(feature => {
+        const id = feature.uuid?.match(/^Compendium\.pf2e\.classfeatures\.Item\.([A-Za-z0-9]+)$/)?.[1];
+        return id && typeof feature.level === 'number' ? [{ id, level: feature.level }] : [];
+      });
+      Promise.allSettled(features.map(async feature => ({ level: feature.level, item: await fetchFeatById(feature.id) })))
+        .then(results => {
+          if (cancelled) return;
+          setClassProficiencyFeatures(results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []));
+          results.forEach(result => { if (result.status === 'rejected') console.error('Failed to load class proficiency feature:', result.reason); });
+        });
+    } catch (error) { console.error('Failed to parse class features:', error); }
+    return () => { cancelled = true; };
+  }, [selectedClass]);
+
+  const classProficiencies = useMemo(() => {
+    const isRank = (value: unknown): value is ProficiencyRank => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 4;
+    const parseRanks = (json: string | undefined): Record<string, unknown> => {
+      try { return JSON.parse(json || '{}') as Record<string, unknown>; } catch { return {}; }
+    };
+    const baseAttacks = parseRanks(selectedClass?.attacks);
+    const baseDefenses = parseRanks(selectedClass?.defenses);
+    const ranks: Record<'perception' | 'fortitude' | 'reflex' | 'will' | 'spellcasting' | 'simple' | 'martial' | 'advanced' | 'unarmed' | 'unarmored' | 'light' | 'medium' | 'heavy', ProficiencyRank> = {
+      perception: (selectedClass?.perception ?? 1) as ProficiencyRank,
+      fortitude: (selectedClass?.fortitude ?? 1) as ProficiencyRank,
+      reflex: (selectedClass?.reflex ?? 1) as ProficiencyRank,
+      will: (selectedClass?.will ?? 1) as ProficiencyRank,
+      spellcasting: 0,
+      simple: isRank(baseAttacks.simple) ? baseAttacks.simple : 0,
+      martial: isRank(baseAttacks.martial) ? baseAttacks.martial : 0,
+      advanced: isRank(baseAttacks.advanced) ? baseAttacks.advanced : 0,
+      unarmed: isRank(baseAttacks.unarmed) ? baseAttacks.unarmed : 0,
+      unarmored: isRank(baseDefenses.unarmored) ? baseDefenses.unarmored : 0,
+      light: isRank(baseDefenses.light) ? baseDefenses.light : 0,
+      medium: isRank(baseDefenses.medium) ? baseDefenses.medium : 0,
+      heavy: isRank(baseDefenses.heavy) ? baseDefenses.heavy : 0,
+    };
+    for (const feature of classProficiencyFeatures) {
+      if (feature.level > activeLevel) continue;
+      try {
+        const system = JSON.parse(feature.item.system_json || '{}') as { subfeatures?: { proficiencies?: Record<string, { rank?: number }> } };
+        for (const key of ['perception', 'fortitude', 'reflex', 'will', 'spellcasting', 'simple', 'martial', 'advanced', 'unarmed', 'unarmored', 'light', 'medium', 'heavy'] as const) {
+          const rank = system.subfeatures?.proficiencies?.[key]?.rank;
+          if (typeof rank === 'number' && Number.isInteger(rank) && rank >= 0 && rank <= 4) ranks[key] = Math.max(ranks[key], rank) as ProficiencyRank;
+        }
+      } catch { /* Ignore malformed feature data. */ }
+    }
+    for (let lvl = 1; lvl <= activeLevel; lvl++) {
+      for (const feat of Object.values(levelData[lvl]?.feats || {})) {
+        try {
+          const system = JSON.parse(feat.system_json || '{}') as { subfeatures?: { proficiencies?: Record<string, { rank?: number }> } };
+          const rank = system.subfeatures?.proficiencies?.spellcasting?.rank;
+          if (typeof rank === 'number' && Number.isInteger(rank) && rank >= 0 && rank <= 4) ranks.spellcasting = Math.max(ranks.spellcasting, rank) as ProficiencyRank;
+        } catch { /* Ignore malformed feat data. */ }
+      }
+    }
+    return ranks;
+  }, [selectedClass, classProficiencyFeatures, activeLevel, levelData]);
+
+  const isPsychicClass = (selectedClass?.slug || selectedClass?.name || '').toLowerCase() === 'psychic';
+  // Psychic spell attack/DC always use the key attribute of the chosen subconscious mind.
+  const psychicKeyAttribute: AttributeKey | undefined = isPsychicClass ? PSYCHIC_MIND_ATTRIBUTES[subclass.trim().toLowerCase()] : undefined;
+  const effectiveSpellcasting = useMemo(() => ({
+    ...spellcasting,
+    ability: psychicKeyAttribute ?? spellcasting.ability,
+    proficiency: Math.max(spellcasting.proficiency, classProficiencies.spellcasting) as ProficiencyRank,
+  }), [spellcasting, classProficiencies.spellcasting, psychicKeyAttribute]);
+
+  // Focus pool size from Foundry rules (e.g. Psi Cantrips and Amps +2, Clarity of Focus +1), capped at 3.
+  const derivedMaxFocusPoints = useMemo(() => {
+    let total = 0;
+    const addFocusRules = (systemJson: string | undefined) => {
+      try {
+        const system = JSON.parse(systemJson || '{}') as { rules?: Array<{ key?: string; path?: string; mode?: string; value?: unknown; predicate?: unknown }> };
+        for (const rule of system.rules || []) {
+          if (rule.key === 'ActiveEffectLike' && rule.path === 'system.resources.focus.max' && rule.mode === 'add' && rule.predicate === undefined && typeof rule.value === 'number') total += rule.value;
+        }
+      } catch { /* Ignore malformed rule data. */ }
+    };
+    classProficiencyFeatures.filter(feature => feature.level <= activeLevel).forEach(feature => addFocusRules(feature.item.system_json));
+    for (let lvl = 1; lvl <= activeLevel; lvl++) Object.values(levelData[lvl]?.feats || {}).forEach(feat => addFocusRules(feat.system_json));
+    return Math.max(0, Math.min(3, total));
+  }, [classProficiencyFeatures, levelData, activeLevel]);
+  const effectiveSession = useMemo(() => {
+    if (derivedMaxFocusPoints === 0) return session;
+    return { ...session, maxFocusPoints: derivedMaxFocusPoints, focusPoints: Math.min(session.focusPoints, derivedMaxFocusPoints) };
+  }, [session, derivedMaxFocusPoints]);
+
   const initialSkillBudget = useMemo(
-    () => computeInitialSkillBudget(selectedBackground, selectedClass, baseAttributes.int || 0),
-    [selectedBackground, selectedClass, baseAttributes.int]
+    () => {
+      const base = computeInitialSkillBudget(selectedBackground, selectedClass, baseAttributes.int || 0);
+      if (!initialOrderSkill) return base;
+      return base.autoTrained.includes(initialOrderSkill)
+        ? { ...base, freeBudget: base.freeBudget + 1 }
+        : { ...base, autoTrained: [...base.autoTrained, initialOrderSkill] };
+    },
+    [selectedBackground, selectedClass, baseAttributes.int, initialOrderSkill]
   );
 
   // Attribute Boosts calculation per level up to activeLevel (with PF2e partial boosts >= +4)
@@ -759,13 +1005,14 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     initialTrainedSkills.forEach(s => {
       ranks[s] = 1;
     });
+    if (initialOrderSkill) ranks[initialOrderSkill] = 1;
 
     // Apply selected effects and increases in level order.
     for (let l = 1; l <= activeLevel; l++) {
       Object.entries(levelData[l]?.feats || {}).forEach(([slot, feat]) => {
-        if (slot !== `order_explorer_${l}`) applyFeatSkillEffects(feat, ranks);
+        if (slot !== `order_explorer_${l}`) applyFeatSkillEffects(feat, ranks, activeLevel);
       });
-      choiceResolution?.grants.filter(grant => grant.level === l).forEach(grant => applyFeatSkillEffects(grant.feat, ranks));
+      choiceResolution?.grants.filter(grant => grant.level === l).forEach(grant => applyFeatSkillEffects(grant.feat, ranks, activeLevel));
       const incs = levelData[l]?.skillIncreases || [];
       const levelCap = maxSkillRankForLevel(l);
       incs.forEach(s => {
@@ -779,7 +1026,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     }
 
     return ranks;
-  }, [initialTrainedSkills, activeLevel, levelData, choiceResolution]);
+  }, [initialTrainedSkills, initialOrderSkill, activeLevel, levelData, choiceResolution]);
 
   // Combat Stats at activeLevel
   const combatStats = useMemo(() => {
@@ -787,21 +1034,21 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     const wisMod = currentAttributes.wis || 0;
     const conMod = currentAttributes.con || 0;
 
-    const armorClass = calculateArmorClass(dexMod, activeLevel, selectedClass, inventory.items);
+    const armorClass = calculateArmorClass(dexMod, activeLevel, classProficiencies, inventory.items);
     const ac = armorClass.value;
 
     // Perception: Class perception rank (default trained = 2 + Level) + Wis
-    const percRank = selectedClass?.perception || 1;
+    const percRank = classProficiencies.perception;
     const percBonus = wisMod + getProficiencyBonus(percRank as ProficiencyRank, activeLevel);
 
     // Saves
-    const fortRank = (selectedClass?.fortitude || 1) as ProficiencyRank;
+    const fortRank = classProficiencies.fortitude;
     const fortBonus = conMod + getProficiencyBonus(fortRank, activeLevel);
 
-    const refRank = (selectedClass?.reflex || 1) as ProficiencyRank;
+    const refRank = classProficiencies.reflex;
     const refBonus = dexMod + getProficiencyBonus(refRank, activeLevel);
 
-    const willRank = (selectedClass?.will || 1) as ProficiencyRank;
+    const willRank = classProficiencies.will;
     const willBonus = wisMod + getProficiencyBonus(willRank, activeLevel);
 
     const speed = selectedAncestry?.speed || 25;
@@ -815,7 +1062,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
       will: willBonus,
       speed
     };
-  }, [currentAttributes, activeLevel, selectedClass, selectedAncestry, inventory.items]);
+  }, [currentAttributes, activeLevel, selectedClass, selectedAncestry, inventory.items, classProficiencies]);
 
   const equippedShield = useMemo(() => {
     const entry = inventory.items.find(
@@ -863,7 +1110,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     const className = selectedClass?.name || '';
     const bonusGeneral = hasVersatileHumanGeneralFeat(selectedHeritage);
     for (let lvl = 1; lvl <= 20; lvl++) {
-      const slots = getFeatSlotsForLevel(t, lvl, className, freeArchetype, selectedClass?.system_json, levelData[lvl]?.feats, bonusGeneral);
+      const slots = getFeatSlotsForLevel(t, lvl, className, effectiveFreeArchetype, selectedClass?.system_json, levelData[lvl]?.feats, bonusGeneral);
       slots.forEach(slot => {
         const feat = levelData[lvl]?.feats?.[slot.id];
         if (slot.category in groups) {
@@ -873,14 +1120,14 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     }
 
     return groups;
-  }, [selectedClass, selectedHeritage, levelData, freeArchetype, t]);
+  }, [selectedClass, selectedHeritage, levelData, effectiveFreeArchetype, t]);
 
   const pendingChoicesCount = useMemo(() => {
     let missing = 0;
     const className = selectedClass?.name || '';
     const bonusGeneral = hasVersatileHumanGeneralFeat(selectedHeritage);
     for (let lvl = 1; lvl <= currentLevel; lvl++) {
-      const slots = getFeatSlotsForLevel(t, lvl, className, freeArchetype, selectedClass?.system_json, levelData[lvl]?.feats, bonusGeneral);
+      const slots = getFeatSlotsForLevel(t, lvl, className, effectiveFreeArchetype, selectedClass?.system_json, levelData[lvl]?.feats, bonusGeneral);
       slots.forEach(slot => {
         const feat = levelData[lvl]?.feats?.[slot.id];
         if (!feat) { missing++; return; }
@@ -891,7 +1138,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
       if ([3, 5, 7, 9, 11, 13, 15, 17, 19].includes(lvl) && !(levelData[lvl]?.skillIncreases?.length)) missing++;
     }
     return missing;
-  }, [selectedClass, selectedHeritage, currentLevel, levelData, freeArchetype, choiceResolution, t]);
+  }, [selectedClass, selectedHeritage, currentLevel, levelData, effectiveFreeArchetype, choiceResolution, t]);
 
   // Handle toggling attribute boost at 5, 10, 15, 20
   const toggleAttributeBoost = (level: number, attr: AttributeKey) => {
@@ -972,6 +1219,41 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     });
   };
 
+  const setFeatChoiceValue = (level: number, slot: string, key: string, value: string) => {
+    setLevelData(previous => {
+      const feats = { ...previous[level].feats };
+      const feat = feats[slot];
+      if (!feat) return previous;
+      const choices = { ...feat.choices };
+      if (value) choices[key] = value;
+      else delete choices[key];
+      feats[slot] = { ...feat, choices };
+      return { ...previous, [level]: { ...previous[level], feats } };
+    });
+  };
+
+  const setSkillReplacementChoice = (level: number, slot: string, originalSkill: SkillKey, replacementSkill: string) => {
+    setFeatChoiceValue(level, slot, `skillReplacement:${originalSkill}`, replacementSkill);
+  };
+
+  const skillsBeforeSlot = (targetLevel: number, excludedSlot: string): Record<SkillKey, ProficiencyRank> => {
+    const ranks = Object.fromEntries(ALL_SKILLS.map(skill => [skill, initialTrainedSkills.has(skill) ? 1 : 0])) as Record<SkillKey, ProficiencyRank>;
+    if (initialOrderSkill) ranks[initialOrderSkill] = Math.max(ranks[initialOrderSkill], 1) as ProficiencyRank;
+    for (let current = 1; current <= targetLevel; current++) {
+      Object.entries(levelData[current]?.feats || {}).forEach(([slot, feat]) => {
+        if (slot !== `order_explorer_${current}` && (current !== targetLevel || slot !== excludedSlot)) applyFeatSkillEffects(feat, ranks);
+      });
+      choiceResolution?.grants
+        .filter(grant => grant.level === current && !(current === targetLevel && (grant.slot === excludedSlot || grant.slot.startsWith(`${excludedSlot}:`))))
+        .forEach(grant => applyFeatSkillEffects(grant.feat, ranks));
+      (levelData[current]?.skillIncreases || []).forEach(skill => {
+        if (ranks[skill] < maxSkillRankForLevel(current)) ranks[skill] = (ranks[skill] + 1) as ProficiencyRank;
+      });
+      Object.assign(ranks, levelData[current]?.skillRankOverrides);
+    }
+    return ranks;
+  };
+
   const orderContextAt = (level: number, slot?: string): Pick<RuleContext, 'orderNames' | 'incompleteOrders'> => ({
     orderNames: choiceCatalog?.orderNames(choiceResolution?.ordersAt(level, slot) || new Set()),
     incompleteOrders: (isDruid && !initialOrder) || choiceResolution?.hasPendingDedication(level, slot),
@@ -987,7 +1269,92 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
       skills: skillRanks,
       feats: choiceResolution?.featsAt(level, slot).map(source => source.feat) || [],
     }).filter(result => result.status === 'unmet' && (definition || /\border\b/i.test(result.text))) : [];
-    if (!definition && !unmetOrders.length) return null;
+    const isFighterOrMonk = feat.featId === ProgressionChoiceCatalog.fighterDedicationId || feat.featName === 'Fighter Dedication'
+      || feat.featId === ProgressionChoiceCatalog.monkDedicationId || feat.featName === 'Monk Dedication';
+    const isRogue = feat.featId === ProgressionChoiceCatalog.rogueDedicationId || feat.featName === 'Rogue Dedication';
+    const isSwashbuckler = feat.featId === ProgressionChoiceCatalog.swashbucklerDedicationId || feat.featName === 'Swashbuckler Dedication';
+    const isThaumaturge = feat.featId === ProgressionChoiceCatalog.thaumaturgeDedicationId || feat.featName === 'Thaumaturge Dedication';
+    const isAldoriDuelist = feat.featId === ProgressionChoiceCatalog.aldoriDuelistDedicationId || feat.featName === 'Aldori Duelist Dedication';
+    const allowsReplacementSkill = [
+      ProgressionChoiceCatalog.oracleDedicationId,
+      ProgressionChoiceCatalog.druidDedicationId,
+      ProgressionChoiceCatalog.witchDedicationId,
+      ProgressionChoiceCatalog.sorcererDedicationId,
+      ProgressionChoiceCatalog.psychicDedicationId,
+      ProgressionChoiceCatalog.bardDedicationId,
+      ProgressionChoiceCatalog.wizardDedicationId,
+      ProgressionChoiceCatalog.clericDedicationId,
+      ProgressionChoiceCatalog.barbarianDedicationId,
+      ProgressionChoiceCatalog.championDedicationId,
+      ProgressionChoiceCatalog.rangerDedicationId,
+      ProgressionChoiceCatalog.kineticistDedicationId,
+      ProgressionChoiceCatalog.guardianDedicationId,
+      ProgressionChoiceCatalog.alchemistDedicationId,
+    ].includes(feat.featId) || feat.featName === 'Gunslinger Dedication';
+    const priorSkills = (allowsReplacementSkill || isFighterOrMonk || isRogue || isSwashbuckler || isThaumaturge || isAldoriDuelist) ? skillsBeforeSlot(level, slot) : null;
+    const directOverlapSkills = priorSkills
+      ? extractFeatSkillGrants(feat).map(entry => entry.skill).filter((skill, idx, arr) => arr.indexOf(skill) === idx && priorSkills[skill] >= 1)
+      : [];
+    if (!definition && !unmetOrders.length && !directOverlapSkills.length && !isFighterOrMonk && !isAldoriDuelist) return null;
+    const choiceLabelKey = (kind: string) => {
+      switch (kind) {
+        case 'membership': return 'creator.druidicOrder';
+        case 'mystery': return 'sheet.oracleMystery';
+        case 'patron': return 'sheet.witchPatron';
+        case 'bloodline': return 'sheet.sorcererBloodline';
+        case 'consciousMind': return 'sheet.psychicConsciousMind';
+        case 'muse': return 'sheet.bardMuse';
+        case 'swashbucklerStyle': return 'sheet.swashbucklerStyle';
+        case 'skillFeat': return 'sheet.rogueSkillFeat';
+        case 'instinct': return 'sheet.barbarianInstinct';
+        case 'cause': return 'sheet.championCause';
+        case 'way': return 'sheet.gunslingerWay';
+        case 'innovation': return 'sheet.inventorInnovation';
+        case 'implement': return 'sheet.thaumaturgeImplement';
+        case 'kineticGate': return 'sheet.kineticistElement';
+        case 'order': return 'sheet.chooseExploredOrder';
+        default: return 'sheet.chooseGrantedFeat';
+      }
+    };
+    const renderFixedPairSkillSelect = (candidateSkills: SkillKey[]) => {
+      if (!priorSkills) return null;
+      const chosen = feat.choices?.skillChoice || '';
+      const available = candidateSkills.filter(s => priorSkills[s] === 0);
+      const options = available.length > 0 ? available : ALL_SKILLS.filter(s => priorSkills[s] === 0 || s === chosen);
+      return (
+        <label className="block text-text-secondary">
+          {t(available.length > 0 ? 'sheet.chooseTrainedSkillFrom' : 'sheet.alreadyTrainedBothSkills', {
+            skills: candidateSkills.map(s => skillName(t, s)).join(' / '),
+          })}
+          <select
+            className="block w-full bg-control rounded-lg p-2 text-white mt-1"
+            value={chosen}
+            onChange={event => setFeatChoiceValue(level, slot, 'skillChoice', event.target.value)}
+          >
+            <option value="">{t('sheet.choicePlaceholder')}</option>
+            {options.map(s => <option key={s} value={s}>{skillName(t, s)}</option>)}
+          </select>
+        </label>
+      );
+    };
+    const renderOverlapSkillSelects = (skills: SkillKey[]) => skills.map(overlapSkill => {
+      const chosen = feat.choices?.[`skillReplacement:${overlapSkill}`] || '';
+      return (
+        <label key={overlapSkill} className="block text-text-secondary">
+          {t('sheet.alreadyTrainedSkill', { skill: skillName(t, overlapSkill) })}
+          <select
+            className="block w-full bg-control rounded-lg p-2 text-white mt-1"
+            value={chosen}
+            onChange={event => setSkillReplacementChoice(level, slot, overlapSkill, event.target.value)}
+          >
+            <option value="">{t('sheet.choicePlaceholder')}</option>
+            {ALL_SKILLS.filter(s => (priorSkills?.[s] ?? 0) === 0 || s === chosen).map(s => (
+              <option key={s} value={s}>{skillName(t, s)}</option>
+            ))}
+          </select>
+        </label>
+      );
+    });
     return (
       <div className="space-y-2 text-xs">
         {unmetOrders.map(result => <p key={result.text} className="text-status-warn">{t('picker.unmet', { list: result.text })}</p>)}
@@ -1007,12 +1374,48 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
             </select>
           </label>
         )}
-        {choices?.map(choice => (
-          <div key={choice.path} className="space-y-1">
+        {!definition && isFighterOrMonk && (
+          <div className="space-y-1.5 rounded-lg bg-surface/70 border border-border-subtle p-2.5">
+            {renderFixedPairSkillSelect(['acrobatics', 'athletics'])}
+          </div>
+        )}
+        {!definition && isAldoriDuelist && priorSkills && (
+          <div className="space-y-1.5 rounded-lg bg-surface/70 border border-border-subtle p-2.5">
             <label className="block text-text-secondary">
-              {t(choice.kind === 'membership' ? 'creator.druidicOrder' : choice.kind === 'order' ? 'sheet.chooseExploredOrder' : 'sheet.chooseGrantedFeat')}
+              {t('sheet.chooseTrainedOrExpertSkillFrom', { skills: `${skillName(t, 'acrobatics')} / ${skillName(t, 'athletics')}` })}
               <select
-                className="block w-full bg-control rounded-lg p-2 text-white"
+                className="block w-full bg-control rounded-lg p-2 text-white mt-1"
+                value={feat.choices?.skillChoice || ''}
+                onChange={event => setFeatChoiceValue(level, slot, 'skillChoice', event.target.value)}
+              >
+                <option value="">{t('sheet.choicePlaceholder')}</option>
+                {(['acrobatics', 'athletics'] as const).map(s => (
+                  <option key={s} value={s}>
+                    {skillName(t, s)} ({proficiencyName(t, priorSkills[s] >= 1 ? 2 : 1)})
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+        {!definition && directOverlapSkills.length > 0 && (
+          <div className="space-y-1.5 rounded-lg bg-surface/70 border border-border-subtle p-2.5">
+            {renderOverlapSkillSelects(directOverlapSkills)}
+          </div>
+        )}
+        {choices?.map(choice => {
+          const grantedOverlapSkills = priorSkills
+            ? [
+                ...directOverlapSkills,
+                ...(choice.grant ? extractFeatSkillGrants(ProgressionChoiceCatalog.selection(choice.grant)).map(entry => entry.skill) : []),
+              ].filter((skill, idx, arr) => arr.indexOf(skill) === idx && priorSkills[skill] >= 1)
+            : [];
+          return (
+          <div key={choice.path} className="space-y-1.5">
+            <label className="block text-text-secondary">
+              {t(choiceLabelKey(choice.kind))}
+              <select
+                className="block w-full bg-control rounded-lg p-2 text-white mt-1"
                 value={choice.selection?.id || ''}
                 disabled={!choice.options.length}
                 onChange={event => setProgressionChoice(level, slot, choice.path, event.target.value)}
@@ -1024,9 +1427,91 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
             {choice.kind === 'order' && choiceResolution?.hasPendingDedication(level, slot) &&
               <p className="text-status-warn">{t('sheet.confirmDedicationOrder')}</p>}
             {choice.grant && <p className="text-accent-text">{t('sheet.choiceGrants', { feat: choice.grant.name })}</p>}
+            {choice.kind === 'mystery' && choice.selection && (
+              <div className="space-y-1.5 rounded-lg bg-surface/70 border border-border-subtle p-2.5">
+                <p className="text-text-secondary">
+                  <strong className="text-text-primary">{t('sheet.oracleSpellcastingLabel')}:</strong>{' '}
+                  {t('sheet.oracleSpellcastingSummary', {
+                    attr: attributeShort(t, 'cha'),
+                    dc: 10 + (currentAttributes.cha || 0) + getProficiencyBonus(Math.max(1, classProficiencies.spellcasting) as ProficiencyRank, activeLevel),
+                    attack: signed((currentAttributes.cha || 0) + getProficiencyBonus(Math.max(1, classProficiencies.spellcasting) as ProficiencyRank, activeLevel)),
+                  })}
+                </p>
+                {renderOverlapSkillSelects(grantedOverlapSkills)}
+                {choice.extraGrants?.map(extra => (
+                  <details key={extra.id} className="pt-1">
+                    <summary className="cursor-pointer text-accent-text font-semibold">{extra.name}</summary>
+                    <div
+                      className="pf-prose text-xs text-text-secondary mt-1.5"
+                      dangerouslySetInnerHTML={{ __html: cleanDescriptionHtml(extra.description, { actorLevel: activeLevel }) }}
+                    />
+                  </details>
+                ))}
+              </div>
+            )}
+            {choice.kind === 'swashbucklerStyle' && choice.selection && (() => {
+              const styleSkillMap: Record<string, SkillKey> = {
+                wit: 'diplomacy', battledancer: 'performance', gymnast: 'athletics',
+                fencer: 'deception', braggart: 'intimidation', rascal: 'thievery',
+              };
+              const styleSkill = styleSkillMap[choice.selection.slug];
+              const candidates: SkillKey[] = styleSkill && styleSkill !== 'acrobatics' ? ['acrobatics', styleSkill] : ['acrobatics'];
+              return (
+                <div className="space-y-1.5 rounded-lg bg-surface/70 border border-border-subtle p-2.5">
+                  {renderFixedPairSkillSelect(candidates)}
+                  {choice.extraGrants?.map(extra => (
+                    <details key={extra.id} className="pt-1">
+                      <summary className="cursor-pointer text-accent-text font-semibold">{extra.name}</summary>
+                      <div
+                        className="pf-prose text-xs text-text-secondary mt-1.5"
+                        dangerouslySetInnerHTML={{ __html: cleanDescriptionHtml(extra.description, { actorLevel: activeLevel }) }}
+                      />
+                    </details>
+                  ))}
+                </div>
+              );
+            })()}
+            {isRogue && priorSkills && (
+              <div className="space-y-1.5 rounded-lg bg-surface/70 border border-border-subtle p-2.5">
+                {renderFixedPairSkillSelect(['stealth', 'thievery'])}
+                <label className="block text-text-secondary">
+                  {t('sheet.rogueExtraSkill')}
+                  <select
+                    className="block w-full bg-control rounded-lg p-2 text-white mt-1"
+                    value={feat.choices?.extraSkillChoice || ''}
+                    onChange={event => setFeatChoiceValue(level, slot, 'extraSkillChoice', event.target.value)}
+                  >
+                    <option value="">{t('sheet.choicePlaceholder')}</option>
+                    {ALL_SKILLS.filter(s => (priorSkills[s] === 0 && s !== feat.choices?.skillChoice) || s === feat.choices?.extraSkillChoice).map(s => (
+                      <option key={s} value={s}>{skillName(t, s)}</option>
+                    ))}
+                  </select>
+                </label>
+                {choice.extraGrants?.map(extra => (
+                  <details key={extra.id} className="pt-1">
+                    <summary className="cursor-pointer text-accent-text font-semibold">{extra.name}</summary>
+                    <div
+                      className="pf-prose text-xs text-text-secondary mt-1.5"
+                      dangerouslySetInnerHTML={{ __html: cleanDescriptionHtml(extra.description, { actorLevel: activeLevel }) }}
+                    />
+                  </details>
+                ))}
+              </div>
+            )}
+            {choice.kind === 'implement' && choice.selection && (
+              <div className="space-y-1.5 rounded-lg bg-surface/70 border border-border-subtle p-2.5">
+                {renderFixedPairSkillSelect(['arcana', 'nature', 'occultism', 'religion'])}
+              </div>
+            )}
+            {choice.kind !== 'mystery' && choice.kind !== 'swashbucklerStyle' && choice.kind !== 'implement' && !isRogue && grantedOverlapSkills.length > 0 && (
+              <div className="space-y-1.5 rounded-lg bg-surface/70 border border-border-subtle p-2.5">
+                {renderOverlapSkillSelects(grantedOverlapSkills)}
+              </div>
+            )}
             {choice.unverified && <p className="text-status-warn">{t('sheet.choiceCheckPrerequisites')}</p>}
           </div>
-        ))}
+          );
+        })}
       </div>
     );
   };
@@ -1103,7 +1588,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
   const effectiveVision: VisionType = visionOverride || ancestryVision;
 
   const snapshot = (level: number = currentLevel) => JSON.stringify({
-    charId, charName, level, portrait, companions, visionOverride, visionRange, senses, appearance, xp, selectedAncestry, selectedHeritage, selectedBackground, selectedClass, subclass, baseAttributes,
+    charId, charName, level, portrait, companions, visionOverride, visionRange, senses, languages, appearance, xp, selectedAncestry, selectedHeritage, selectedBackground, selectedClass, subclass, psychicConsciousMind, baseAttributes,
     initialTrainedSkills: [...initialTrainedSkills].sort(), loreSkills, spellcasting, freeArchetype, inventory, strikes, session,
     levelData: Object.fromEntries(Object.entries(levelData).map(([key, data]) => [key, {
       ...data, feats: Object.fromEntries(Object.entries(data.feats || {}).map(([slot, feat]) => {
@@ -1145,7 +1630,8 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
             ancestry: selectedAncestry,
             heritage: selectedHeritage,
             background: selectedBackground,
-            selectedClass: selectedClass
+            selectedClass: selectedClass,
+            psychicConsciousMind
           },
           baseAttributes,
           calculatedAttributes: Object.fromEntries(
@@ -1157,6 +1643,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
           visionOverride,
           visionRange,
           senses,
+          languages,
           appearance,
           xp,
           inventory,
@@ -1184,7 +1671,8 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
       return false;
     } catch (err) {
       console.error('Erro ao salvar progressão:', err);
-      setSaveErrorMsg(t('sheet.saveError'));
+      const detail = err instanceof Error && err.message ? `\n(${err.message})` : '';
+      setSaveErrorMsg(`${t('sheet.saveError')}${detail}`);
       return false;
     } finally {
       setSaving(false);
@@ -1205,6 +1693,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
   const handleLevelUp = async () => {
     if (currentLevel >= 20) return;
     const nextLvl = currentLevel + 1;
+    if ((selectedClass?.slug || selectedClass?.name || '').toLowerCase() === 'psychic') setSpellcasting(previous => ({ ...previous, slotsMax: advancePsychicSlots(previous.slotsMax, currentLevel, nextLvl) }));
     pendingLevelSave.current = t('sheet.levelUpMsg', { name: charName, level: nextLvl });
     setCurrentLevel(nextLvl);
     setInspectLevel(nextLvl);
@@ -1215,6 +1704,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     if (currentLevel <= 1) return;
     const removedLevel = currentLevel;
     const prevLvl = currentLevel - 1;
+    if ((selectedClass?.slug || selectedClass?.name || '').toLowerCase() === 'psychic') setSpellcasting(previous => ({ ...previous, slotsMax: advancePsychicSlots(previous.slotsMax, currentLevel, prevLvl) }));
     pendingLevelSave.current = t('sheet.levelDownMsg', { name: charName, level: prevLvl });
     setLevelData(prev => ({
       ...prev,
@@ -1231,6 +1721,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
 
   // Set Official Level to a target level
   const handleSetOfficialLevel = async (targetLvl: number) => {
+    if ((selectedClass?.slug || selectedClass?.name || '').toLowerCase() === 'psychic') setSpellcasting(previous => ({ ...previous, slotsMax: advancePsychicSlots(previous.slotsMax, currentLevel, targetLvl) }));
     pendingLevelSave.current = t('sheet.officialLevelMsg', { name: charName, level: targetLvl });
     setCurrentLevel(targetLvl);
     setInspectLevel(targetLvl);
@@ -1255,7 +1746,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
             {icon}
             <span>{title}</span>
           </h4>
-          <span className="text-[11px] px-2 py-0.5 rounded-full bg-elevated text-accent-text font-bold border border-border-strong">
+          <span className="text-xs px-2 py-0.5 rounded-full bg-elevated text-accent-text font-bold border border-border-strong">
             {t('sheet.filledOf', { filled: filledCount, total: totalSlots })}
           </span>
         </div>
@@ -1297,9 +1788,9 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                           </h5>
                           <div className="flex items-center gap-1.5 flex-shrink-0">
                             {actionLabel && (
-                              <span className="pf-action-icon text-[11px]">{actionLabel}</span>
+                              <span className="pf-action-icon text-xs">{actionLabel}</span>
                             )}
-                            <span className="text-[11px] text-accent-text font-bold px-2 py-0.5 rounded bg-elevated border border-border-strong tabular-nums">
+                            <span className="text-xs text-accent-text font-bold px-2 py-0.5 rounded bg-elevated border border-border-strong tabular-nums">
                               {t('common.levelShort', { level })}
                             </span>
                           </div>
@@ -1307,14 +1798,14 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
 
                         <div className="flex flex-wrap gap-1">
                           {feat.category && (
-                            <span className="text-[11px] font-semibold uppercase px-2 py-0.5 rounded-full bg-status-info-bg text-status-info border border-status-info-border">
+                            <span className="text-xs font-semibold uppercase px-2 py-0.5 rounded-full bg-status-info-bg text-status-info border border-status-info-border">
                               {feat.category}
                             </span>
                           )}
                           {featTraits.map(trait => (
                             <span
                               key={trait}
-                              className="text-[11px] font-medium uppercase px-2 py-0.5 rounded-full bg-elevated text-text-secondary border border-border-subtle"
+                              className="text-xs font-medium uppercase px-2 py-0.5 rounded-full bg-elevated text-text-secondary border border-border-subtle"
                             >
                               {trait}
                             </span>
@@ -1327,7 +1818,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                     {feat.description && (
                       <div
                         className="pf-prose text-xs text-text-secondary leading-relaxed pt-2 border-t border-border-subtle"
-                        dangerouslySetInnerHTML={{ __html: cleanDescriptionHtml(feat.description) }}
+                        dangerouslySetInnerHTML={{ __html: cleanDescriptionHtml(feat.description, { actorLevel: activeLevel }) }}
                       />
                     )}
                   </article>
@@ -1357,13 +1848,13 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                       <span className="text-xs font-bold block truncate text-white">
                         {slot.title}
                       </span>
-                      <span className="text-[11px] text-text-secondary block">
+                      <span className="text-xs text-text-secondary block">
                         {t('sheet.availableForSelection', { level })}
                       </span>
                     </div>
                   </div>
 
-                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg flex-shrink-0 bg-accent text-black shadow">
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-lg flex-shrink-0 bg-accent text-black shadow">
                     {t('common.choose')}
                   </span>
                 </div>
@@ -1387,9 +1878,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
           if (armorSys.category) category = armorSys.category;
           acItemBonus = (typeof armorSys.acBonus === 'number' ? armorSys.acBonus : 0) + (typeof armorSys.runes?.potency === 'number' ? armorSys.runes.potency : 0);
         }
-        const defenses = JSON.parse(selectedClass?.defenses || '{}') as Record<string, unknown>;
-        const raw = defenses[category];
-        if (typeof raw === 'number' && raw >= 0 && raw <= 4) acProfRank = raw as ProficiencyRank;
+        if (category in classProficiencies) acProfRank = classProficiencies[category as keyof typeof classProficiencies];
       } catch { /* fallback to trained */ }
 
       await exportCharacterToFillablePdf({
@@ -1401,6 +1890,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
         portrait,
         vision: effectiveVision,
         senses: [visionRange, senses].filter(Boolean).join(', '),
+        languages,
         attributes: currentAttributes,
         maxHp: effectiveMaxHp,
         ac: effectiveCombatStats.ac,
@@ -1408,36 +1898,49 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
         acItemBonus,
         fortitude: {
           total: effectiveCombatStats.fortitude,
-          profRank: (selectedClass?.fortitude || 1) as ProficiencyRank,
+          profRank: classProficiencies.fortitude,
         },
         reflex: {
           total: effectiveCombatStats.reflex,
-          profRank: (selectedClass?.reflex || 1) as ProficiencyRank,
+          profRank: classProficiencies.reflex,
         },
         will: {
           total: effectiveCombatStats.will,
-          profRank: (selectedClass?.will || 1) as ProficiencyRank,
+          profRank: classProficiencies.will,
         },
         perception: {
           total: effectiveCombatStats.perception,
-          profRank: (selectedClass?.perception || 1) as ProficiencyRank,
+          profRank: classProficiencies.perception,
         },
         speed: combatStats.speed,
         skillRanks,
         strikes: strikes.map(strike => {
           const entry = inventory.items.find(item => item.id === strike.inventoryEntryId)
             || (!strike.inventoryEntryId ? inventory.items.find(item => item.item.item_type === 'weapon' && item.item.name === strike.weapon) : undefined);
-          const weapon = entry ? calculateWeaponStrike(entry.item, strike.kind, currentAttributes.str, selectedClass) : null;
+          const weapon = entry ? calculateWeaponStrike(entry.item, strike.kind, currentAttributes.str, classProficiencies) : null;
           return weapon ? { ...strike, itemBonus: weapon.itemBonus, dice: weapon.dice,
             strengthDamage: weapon.strengthDamage, damageType: strike.damageTypeOverride && weapon.damageTypes.includes(strike.damageTypeOverride) ? strike.damageTypeOverride : weapon.damageType,
             traits: weapon.traits.join(', ') } : strike;
         }),
         levelData,
+        grantedFeats: (choiceResolution?.grants || []).map(grant => ({ level: grant.level, name: grant.feat.featName, category: grant.feat.category })),
+        backgroundFeats: (() => {
+          try {
+            const system = JSON.parse(selectedBackground?.system_json || '{}') as { items?: Record<string, { name?: string; uuid?: string }> };
+            return Object.values(system.items || {}).filter(item => item.uuid?.includes('feats-srd.Item.') && typeof item.name === 'string').map(item => item.name as string);
+          } catch { return []; }
+        })(),
+        classFeatures: (() => {
+          try {
+            const system = JSON.parse(selectedClass?.system_json || '{}') as { items?: Record<string, { name?: string; level?: number }> };
+            return Object.values(system.items || {}).filter((feature): feature is { name: string; level: number } => typeof feature.name === 'string' && typeof feature.level === 'number').sort((a, b) => a.level - b.level);
+          } catch { return []; }
+        })(),
         inventory,
-        session,
+        session: effectiveSession,
         companions,
-        spellcasting,
-      });
+        spellcasting: effectiveSpellcasting,
+      }, pdfTemplate);
     } catch (err) {
       console.error('Erro ao exportar PDF:', err);
       setSaveErrorMsg(t('sheet.exportPdfError'));
@@ -1445,46 +1948,66 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
   };
 
   const handleExportJson = () => {
+    let acProfRank: ProficiencyRank = 1;
+    let acItemBonus = 0;
+    try {
+      const armor = inventory.items.find((entry) => entry.equipped && entry.item.item_type === 'armor');
+      let category = 'unarmored';
+      if (armor) {
+        const armorSys = JSON.parse(armor.item.system_json || '{}') as { category?: string; acBonus?: number; runes?: { potency?: number } };
+        if (armorSys.category) category = armorSys.category;
+        acItemBonus = (typeof armorSys.acBonus === 'number' ? armorSys.acBonus : 0) + (typeof armorSys.runes?.potency === 'number' ? armorSys.runes.potency : 0);
+      }
+      if (category in classProficiencies) acProfRank = classProficiencies[category as keyof typeof classProficiencies];
+    } catch { /* fallback to trained */ }
+
+    const consciousMindName = choiceResolution?.choices
+      ? Array.from(choiceResolution.choices.values())
+          .flat()
+          .find((c) => c.kind === 'consciousMind')?.selection?.name
+      : undefined;
+
     exportCharacterJson({
       name: charName,
       level: currentLevel,
-      ancestry: selectedAncestry?.name || '',
-      heritage: selectedHeritage?.name || '',
-      background: selectedBackground?.name || '',
-      class: selectedClass?.name || '',
+      ancestry: selectedAncestry,
+      heritage: selectedHeritage,
+      background: selectedBackground,
+      selectedClass,
       subclass: resolvedSubclass,
-      data: {
-        charState: {
-          ...originalCharState.current,
-          name: charName,
-          level: currentLevel,
-          ancestry: selectedAncestry,
-          heritage: selectedHeritage,
-          background: selectedBackground,
-          selectedClass: selectedClass,
-        },
-        baseAttributes,
-        calculatedAttributes: Object.fromEntries(
-          ALL_ATTRIBUTES.map(attr => [attr, { mod: currentAttributes[attr], score: 10 + currentAttributes[attr] * 2 }])
-        ),
-        freeArchetype,
-        portrait,
-        companions,
-        visionOverride,
-        visionRange,
-        senses,
-        appearance,
-        xp,
-        inventory,
-        strikes,
-        session,
-        progressionLevels: levelsForSave,
-        initialTrainedSkills: Array.from(initialTrainedSkills),
-        loreSkills,
-        spellcasting,
-        combatStats,
-        hpStats,
+      consciousMindName,
+      charState: {
+        ...originalCharState.current,
+        name: charName,
+        level: currentLevel,
+        ancestry: selectedAncestry,
+        heritage: selectedHeritage,
+        background: selectedBackground,
+        selectedClass,
+        psychicConsciousMind,
       },
+      currentAttributes,
+      appearance,
+      xp,
+      languages,
+      hpStats: {
+        ancestryHp: hpStats.ancestryHp,
+        baseClassHp: hpStats.baseClassHp,
+        bonusPerLevel: hpBonusInfo.bonusPerLevel,
+      },
+      speed: combatStats.speed,
+      acTotal: effectiveCombatStats.ac,
+      acProfRank,
+      acItemBonus,
+      shieldBonus: equippedShield?.acBonus,
+      proficiencies: classProficiencies,
+      skillRanks,
+      loreSkills,
+      levelData: levelsForSave,
+      inventory,
+      strikes,
+      spellcasting: effectiveSpellcasting,
+      focusPoints: effectiveSession.maxFocusPoints,
     });
   };
 
@@ -1494,7 +2017,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
     if (!file) return;
     try {
       const text = await file.text();
-      const imported = parseImportedCharacterJson(text);
+      const imported = await parseImportedCharacterJson(text);
       const res = await saveCharacter(imported);
       if (res.success) {
         const updated = await fetchCharacters();
@@ -1556,7 +2079,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                   </span>
                 )}
                 {isDirty && (
-                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-status-warn-bg text-status-warn border border-status-warn-border">
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-status-warn-bg text-status-warn border border-status-warn-border">
                     {t('sheet.unsavedBadge')}
                   </span>
                 )}
@@ -1584,7 +2107,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 pt-0.5">
                 {APPEARANCE_FIELDS.map(field => (
                   <label key={field} className="bg-inset border border-border-subtle focus-within:border-accent rounded-lg px-2 py-1 flex flex-col">
-                    <span className="text-[10px] uppercase font-bold text-text-muted tracking-wider leading-none mb-0.5">
+                    <span className="text-xs uppercase font-bold text-text-muted tracking-wider leading-none mb-0.5">
                       {t(`sheet.appearance.${field}`)}
                     </span>
                     <input
@@ -1597,7 +2120,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                   </label>
                 ))}
                 <label className="bg-inset border border-border-subtle focus-within:border-accent rounded-lg px-2 py-1 flex flex-col">
-                  <span className="text-[10px] uppercase font-bold text-text-muted tracking-wider leading-none mb-0.5">{t('sheet.xp')}</span>
+                  <span className="text-xs uppercase font-bold text-text-muted tracking-wider leading-none mb-0.5">{t('sheet.xp')}</span>
                   <input
                     type="number"
                     min={0}
@@ -1636,6 +2159,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
             />
             <IconButton
               onClick={handleExportPdf}
+              data-shortcut="export-pdf"
               label={t('sheet.exportPdf')}
               icon={<FileDown className="w-4 h-4 text-accent-text" />}
             />
@@ -1693,9 +2217,9 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
             <div className="lg:col-span-3 bg-inset border border-border-strong rounded-xl p-3 flex items-center space-x-2.5">
               <Heart className="w-5 h-5 text-status-danger flex-shrink-0" />
               <div>
-                <span className="text-[11px] uppercase font-bold text-text-secondary block">{t('sheet.hitPoints')}</span>
+                <span className="text-xs uppercase font-bold text-text-secondary block">{t('sheet.hitPoints')}</span>
                 <span className="text-base font-black text-white">{session.currentHp ?? effectiveMaxHp}/{effectiveMaxHp} {t('common.hp')}</span>
-                <span className="text-[11px] text-text-muted block">
+                <span className="text-xs text-text-muted block">
                   {t('sheet.perLevel', { value: hpStats.perLevelHp })}
                   {hpBonusInfo.hasDiehard && <span className="text-status-warn ml-1 font-bold" title={t('sheet.diehardTitle')}>• {t('sheet.diehard')}</span>}
                   {hpBonusInfo.hasToughness && <span className="text-status-success ml-1 font-bold" title={t('sheet.toughnessTitle')}>• {t('sheet.toughness')}</span>}
@@ -1707,73 +2231,103 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
             <div className="lg:col-span-3 bg-inset border border-border-strong rounded-xl p-3 flex items-center space-x-2.5">
               <Shield className="w-5 h-5 text-status-info flex-shrink-0" />
               <div>
-                <span className="text-[11px] uppercase font-bold text-text-secondary block">{t('sheet.armorClass')}</span>
+                <span className="text-xs uppercase font-bold text-text-secondary block">{t('sheet.armorClass')}</span>
                 <span className="text-base font-black text-white">{effectiveCombatStats.ac} {t('common.ac')}</span>
-                <span className="text-[11px] text-text-muted block">{combatStats.armorClass.armorName ?? t('armor.none')}</span>
-                {combatStats.armorClass.warnings.length > 0 && <span className="text-[11px] text-status-warn block">{combatStats.armorClass.warnings.map(key => t(key)).join(' ')}</span>}
+                <span className="text-xs text-text-muted block">{combatStats.armorClass.armorName ?? t('armor.none')}</span>
+                {combatStats.armorClass.warnings.length > 0 && <span className="text-xs text-status-warn block">{combatStats.armorClass.warnings.map(key => t(key)).join(' ')}</span>}
               </div>
             </div>
 
             {/* Saving Throws Capsule (Fortitude, Reflex, Will) */}
             <div className="sm:col-span-2 lg:col-span-6 bg-inset border border-border-strong rounded-xl p-3 flex flex-col justify-between gap-2">
-              <span className="text-[11px] uppercase font-bold text-text-secondary tracking-wider flex items-center gap-1.5">
+              <span className="text-xs uppercase font-bold text-text-secondary tracking-wider flex items-center gap-1.5">
                 <Shield className="w-3.5 h-3.5 text-accent-text" />
                 <span>{t('creator.savingThrows')}</span>
               </span>
               <div className="grid grid-cols-3 gap-2">
                 <div className="bg-surface border border-border-subtle rounded-lg px-2.5 py-1.5 flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-status-warn flex-shrink-0" />
+                  <BicepsFlexed className="w-4 h-4 text-status-warn flex-shrink-0" />
                   <div className="min-w-0">
-                    <span className="text-[11px] uppercase font-bold text-text-secondary block truncate">{t('sheet.fortitude')}</span>
+                    <button
+                      type="button"
+                      onClick={() => rollCheck(t('sheet.fortitude'), effectiveCombatStats.fortitude)}
+                      className="text-xs uppercase font-bold text-text-secondary hover:text-accent-text hover:underline block truncate text-left cursor-pointer"
+                    >
+                      {t('sheet.fortitude')}
+                    </button>
                     <span className="text-sm font-black text-white">{signed(effectiveCombatStats.fortitude)}</span>
-                    <span className="text-[11px] text-text-muted block">{attributeShort(t, 'con')}</span>
+                    <span className="text-xs text-text-muted block">{attributeShort(t, 'con')} · {proficiencyName(t, classProficiencies.fortitude)}</span>
                   </div>
                 </div>
                 <div className="bg-surface border border-border-subtle rounded-lg px-2.5 py-1.5 flex items-center gap-2">
                   <Footprints className="w-4 h-4 text-status-success flex-shrink-0" />
                   <div className="min-w-0">
-                    <span className="text-[11px] uppercase font-bold text-text-secondary block truncate">{t('sheet.reflex')}</span>
+                    <button
+                      type="button"
+                      onClick={() => rollCheck(t('sheet.reflex'), effectiveCombatStats.reflex)}
+                      className="text-xs uppercase font-bold text-text-secondary hover:text-accent-text hover:underline block truncate text-left cursor-pointer"
+                    >
+                      {t('sheet.reflex')}
+                    </button>
                     <span className="text-sm font-black text-white">{signed(effectiveCombatStats.reflex)}</span>
-                    <span className="text-[11px] text-text-muted block">{attributeShort(t, 'dex')}</span>
+                    <span className="text-xs text-text-muted block">{attributeShort(t, 'dex')} · {proficiencyName(t, classProficiencies.reflex)}</span>
                   </div>
                 </div>
                 <div className="bg-surface border border-border-subtle rounded-lg px-2.5 py-1.5 flex items-center gap-2">
-                  <BookOpen className="w-4 h-4 text-status-purple flex-shrink-0" />
+                  <Brain className="w-4 h-4 text-status-purple flex-shrink-0" />
                   <div className="min-w-0">
-                    <span className="text-[11px] uppercase font-bold text-text-secondary block truncate">{t('sheet.will')}</span>
+                    <button
+                      type="button"
+                      onClick={() => rollCheck(t('sheet.will'), effectiveCombatStats.will)}
+                      className="text-xs uppercase font-bold text-text-secondary hover:text-accent-text hover:underline block truncate text-left cursor-pointer"
+                    >
+                      {t('sheet.will')}
+                    </button>
                     <span className="text-sm font-black text-white">{signed(effectiveCombatStats.will)}</span>
-                    <span className="text-[11px] text-text-muted block">{attributeShort(t, 'wis')}</span>
+                    <span className="text-xs text-text-muted block">{attributeShort(t, 'wis')} · {proficiencyName(t, classProficiencies.will)}</span>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Percepção & Movimento */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="bg-inset border border-border-strong rounded-xl p-3 flex items-center space-x-2.5">
-              <Eye className="w-5 h-5 text-status-purple flex-shrink-0" />
-              <div>
-                <span className="text-[11px] uppercase font-bold text-text-secondary block">{t('sheet.perception')}</span>
-                <span className="text-base font-black text-white">{signed(effectiveCombatStats.perception)}</span>
-                <span className="text-[11px] text-text-muted block">{t('sheet.initiative')}</span>
+          {/* Percepção & Movimento, Visão & Sentidos, Idiomas */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+            <div className="lg:col-span-3 flex flex-col gap-2">
+              <div className="bg-inset border border-border-strong rounded-xl px-3 py-2 flex items-center justify-between gap-2">
+                <div className="flex items-center space-x-2 min-w-0">
+                  <Eye className="w-4 h-4 text-status-purple flex-shrink-0" />
+                  <div className="min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => rollCheck(t('sheet.perception'), effectiveCombatStats.perception)}
+                      className="text-xs uppercase font-bold text-text-secondary hover:text-accent-text hover:underline block leading-tight text-left cursor-pointer"
+                    >
+                      {t('sheet.perception')}
+                    </button>
+                    <span className="text-xs text-text-muted block truncate">{t('sheet.initiative')} · {proficiencyName(t, classProficiencies.perception)}</span>
+                  </div>
+                </div>
+                <span className="text-base font-black text-white flex-shrink-0">{signed(effectiveCombatStats.perception)}</span>
               </div>
-            </div>
 
-            <div className="bg-inset border border-border-strong rounded-xl p-3 flex items-center space-x-2.5">
-              <Footprints className="w-5 h-5 text-status-warn flex-shrink-0" />
-              <div>
-                <span className="text-[11px] uppercase font-bold text-text-secondary block">{t('creator.speed')}</span>
-                <span className="text-base font-black text-white">{t('common.feet', { value: combatStats.speed })}</span>
-                <span className="text-[11px] text-text-muted block">{selectedAncestry?.name || t('common.ancestry')}</span>
+              <div className="bg-inset border border-border-strong rounded-xl px-3 py-2 flex items-center justify-between gap-2">
+                <div className="flex items-center space-x-2 min-w-0">
+                  <Footprints className="w-4 h-4 text-status-warn flex-shrink-0" />
+                  <div className="min-w-0">
+                    <span className="text-xs uppercase font-bold text-text-secondary block leading-tight">{t('creator.speed')}</span>
+                    <span className="text-xs text-text-muted block truncate">{selectedAncestry?.name || t('common.ancestry')}</span>
+                  </div>
+                </div>
+                <span className="text-base font-black text-white flex-shrink-0">{t('common.feet', { value: combatStats.speed })}</span>
               </div>
             </div>
 
             {/* Visão & Sentidos */}
-            <div className="col-span-2 bg-inset border border-border-strong rounded-xl p-3 flex items-start space-x-2.5">
-              <Sparkles className="w-5 h-5 text-accent-text flex-shrink-0 mt-0.5" />
+            <div className="lg:col-span-5 bg-inset border border-border-strong rounded-xl p-3 flex items-start space-x-2.5">
+              <Eye className="w-5 h-5 text-accent-text flex-shrink-0 mt-0.5" />
               <div className="min-w-0 flex-1 space-y-1.5">
-                <span className="text-[11px] uppercase font-bold text-text-secondary block">{t('sheet.vision')}</span>
+                <span className="text-xs uppercase font-bold text-text-secondary block">{t('sheet.vision')}</span>
                 <div className="flex items-center gap-2">
                   <select
                     aria-label={t('sheet.vision')}
@@ -1807,13 +2361,87 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                 />
               </div>
             </div>
+
+            {/* Línguas conhecidas */}
+            {(() => {
+              const languageList = languages.split(',').map(item => item.trim()).filter(Boolean);
+              const langInfo = parseAncestryLanguageInfo(selectedAncestry);
+              const expectedLanguages = langInfo.fixed.length + langInfo.extraCount + Math.max(0, currentAttributes.int || 0);
+              const addLanguage = () => {
+                const trimmed = newLanguage.trim();
+                if (!trimmed) return;
+                if (!languageList.some(item => item.toLowerCase() === trimmed.toLowerCase())) {
+                  setLanguages([...languageList, trimmed].join(', '));
+                }
+                setNewLanguage('');
+              };
+              const removeLanguage = (target: string) => {
+                setLanguages(languageList.filter(item => item !== target).join(', '));
+              };
+              return (
+                <div className="lg:col-span-4 bg-inset border border-border-strong rounded-xl p-3 flex flex-col justify-between gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs uppercase font-bold text-text-secondary flex items-center gap-1.5">
+                      <BookOpen className="w-4 h-4 text-accent-text flex-shrink-0" />
+                      <span>{t('sheet.languages')}: {languageList.length}</span>
+                    </span>
+                    {expectedLanguages > 0 && (
+                      <span className="text-xs text-text-muted tabular-nums">
+                        {t('sheet.languagesExpected', { expected: expectedLanguages })}
+                      </span>
+                    )}
+                  </div>
+                  <div className="max-h-20 overflow-y-auto pr-1 space-y-1">
+                    {languageList.length === 0 ? (
+                      <p className="text-xs text-text-muted italic">{t('sheet.languagesPlaceholder')}</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {languageList.map(lang => (
+                          <span key={lang} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-surface border border-border-subtle text-xs font-semibold text-text-primary">
+                            <span>{lang}</span>
+                            <button
+                              type="button"
+                              onClick={() => removeLanguage(lang)}
+                              aria-label={`${t('common.remove')} ${lang}`}
+                              className="text-text-muted hover:text-status-danger leading-none print:hidden"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 print:hidden">
+                    <input
+                      type="text"
+                      aria-label={t('sheet.languages')}
+                      value={newLanguage}
+                      onChange={event => setNewLanguage(event.target.value)}
+                      onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addLanguage(); } }}
+                      placeholder={t('sheet.languagesPlaceholder')}
+                      className="flex-1 min-w-0 bg-surface border border-border-subtle rounded-lg px-2 py-1 text-xs text-text-primary placeholder:text-text-muted"
+                    />
+                    <button
+                      type="button"
+                      onClick={addLanguage}
+                      disabled={!newLanguage.trim()}
+                      aria-label={t('sheet.languages')}
+                      className="px-2 py-1 rounded-lg bg-accent hover:bg-accent-hover disabled:opacity-40 text-black font-bold text-xs flex-shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
 
         {/* Attribute Modifiers fixos junto aos dados do personagem */}
         <div className="pt-3 border-t border-border-subtle space-y-2">
           <div className="flex items-center justify-between">
-            <h4 className="text-[11px] font-bold uppercase text-text-secondary tracking-wider flex items-center gap-1.5">
+            <h4 className="text-xs font-bold uppercase text-text-secondary tracking-wider flex items-center gap-1.5">
               <Star className="w-3.5 h-3.5 text-accent-text" />
               <span>{t('sheet.consolidatedAttributes')}</span>
             </h4>
@@ -1823,7 +2451,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
               const mod = currentAttributes[attr];
               return (
                 <div key={attr} className="bg-inset border border-border-strong rounded-xl p-2">
-                  <span className="text-[11px] uppercase font-bold text-text-secondary block">{attributeShort(t, attr)}</span>
+                  <span className="text-xs uppercase font-bold text-text-secondary block">{attributeShort(t, attr)}</span>
                   <input
                     type="number"
                     aria-label={attributeName(t, attr)}
@@ -1849,7 +2477,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                   {levelData[activeLevel]?.attributeOverrides?.[attr] !== undefined && (
                     <button
                       type="button"
-                      className="block mx-auto text-[10px] text-accent-text underline print:hidden"
+                      className="block mx-auto text-xs text-accent-text underline print:hidden"
                       onClick={() => setLevelData(previous => {
                         const overrides = { ...previous[activeLevel].attributeOverrides };
                         delete overrides[attr];
@@ -1894,7 +2522,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
             >
               <span>{tab.label}</span>
               {'badge' in tab && tab.badge !== undefined && (
-                <span className={`px-1.5 py-0.5 rounded-full text-[11px] tabular-nums ${
+                <span className={`px-1.5 py-0.5 rounded-full text-xs tabular-nums ${
                   sheetTab === tab.id
                     ? 'bg-accent/20 text-accent-text'
                     : 'bg-status-warn-bg text-status-warn border border-status-warn-border'
@@ -1910,12 +2538,12 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
 
       {sheetTab === 'combat' && (
         <div className="space-y-3">
-          <SessionCombatPanel session={session} maxHp={effectiveMaxHp} equippedShield={equippedShield} onChange={setSession} />
+          <SessionCombatPanel session={effectiveSession} maxHp={effectiveMaxHp} equippedShield={equippedShield} onChange={setSession} />
 
           <StrikesView
             strikes={strikes}
             inventory={inventory.items}
-            characterClass={selectedClass}
+            attackRanks={classProficiencies}
             attributes={currentAttributes}
             level={activeLevel}
             athleticsRank={skillRanks.athletics}
@@ -1940,7 +2568,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
               const rank = skillRanks[s];
               const attrMod = currentAttributes[info.attribute] || 0;
               const profBonus = getProficiencyBonus(rank, currentLevel);
-              const condPenalty = info.attribute === 'str' ? conditionPenalties.strChecks : info.attribute === 'dex' ? conditionPenalties.dexChecks : conditionPenalties.allChecks;
+              const condPenalty = info.attribute === 'str' ? conditionPenalties.strChecks : info.attribute === 'dex' ? conditionPenalties.dexChecks : info.attribute === 'con' ? conditionPenalties.allChecks : conditionPenalties.mentalChecks;
               const total = attrMod + profBonus + condPenalty;
 
               return (
@@ -1949,8 +2577,14 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                   className="flex items-center justify-between px-3 py-2 rounded-xl bg-inset border border-border-subtle text-xs"
                 >
                   <div className="min-w-0">
-                    <span className="font-bold text-text-primary block truncate">{skillName(t, s)}</span>
-                    <span className="text-[11px] text-text-muted uppercase tabular-nums">
+                    <button
+                      type="button"
+                      onClick={() => rollCheck(skillName(t, s), total)}
+                      className="font-bold text-text-primary hover:text-accent-text hover:underline block truncate text-left cursor-pointer"
+                    >
+                      {skillName(t, s)}
+                    </button>
+                    <span className="text-xs text-text-muted uppercase tabular-nums">
                       {attributeShort(t, info.attribute)} ({signed(attrMod)})
                     </span>
                   </div>
@@ -1958,7 +2592,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <span
                       title={proficiencyName(t, rank)}
-                      className={`px-1.5 py-0.5 rounded text-[11px] font-bold border ${
+                      className={`px-1.5 py-0.5 rounded text-xs font-bold border ${
                         rank > 0
                           ? 'bg-accent/15 text-accent-text border-accent/40'
                           : 'bg-elevated text-text-muted border-border-subtle'
@@ -1988,22 +2622,30 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                 {loreSkills.map(lore => {
                   const intMod = currentAttributes.int || 0;
                   const profBonus = getProficiencyBonus(lore.rank, currentLevel);
-                  const total = intMod + profBonus + conditionPenalties.allChecks;
+                  const total = intMod + profBonus + conditionPenalties.mentalChecks;
                   return (
                     <div
                       key={lore.id}
                       className="flex items-center justify-between px-3 py-2 rounded-xl bg-inset border border-border-subtle text-xs"
                     >
                       <div className="min-w-0">
-                        <span className="font-bold text-text-primary block truncate">{lore.name}</span>
-                        <span className="text-[11px] text-text-muted uppercase tabular-nums">
+                        {lore.id === 'lore_scout_terrain' ? <input aria-label={t('sheet.scoutTerrainLore')} placeholder={t('sheet.scoutTerrainLore')} value={lore.name} onChange={event => setLoreSkills(previous => previous.map(item => item.id === lore.id ? { ...item, name: event.target.value } : item))} className="w-full min-w-0 bg-control rounded px-2 py-1 text-text-primary" /> : (
+                          <button
+                            type="button"
+                            onClick={() => rollCheck(lore.name, total)}
+                            className="font-bold text-text-primary hover:text-accent-text hover:underline block truncate text-left cursor-pointer"
+                          >
+                            {lore.name}
+                          </button>
+                        )}
+                        <span className="text-xs text-text-muted uppercase tabular-nums">
                           {attributeShort(t, 'int')} ({signed(intMod)})
                         </span>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <span
                           title={proficiencyName(t, lore.rank)}
-                          className={`px-1.5 py-0.5 rounded text-[11px] font-bold border ${
+                          className={`px-1.5 py-0.5 rounded text-xs font-bold border ${
                             lore.rank > 0
                               ? 'bg-accent/15 text-accent-text border-accent/40'
                               : 'bg-elevated text-text-muted border-border-subtle'
@@ -2024,14 +2666,77 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
         </div>
       )}
 
-      {sheetTab === 'spells' && (
+      {sheetTab === 'spells' && (() => {
+        const oracleEntry = Array.from(choiceResolution?.choices.values() || []).flat().find(choice => choice.kind === 'mystery');
+        const hasOracleDedication = Object.entries(levelData)
+          .filter(([lvl]) => Number(lvl) <= currentLevel)
+          .some(([, data]) => Object.values(data.feats || {}).some(feat =>
+            feat.featId === ProgressionChoiceCatalog.oracleDedicationId || feat.featName === 'Oracle Dedication'
+          ));
+        const oracleProfRank = Math.max(1, classProficiencies.spellcasting) as ProficiencyRank;
+        const oracleAttack = (currentAttributes.cha || 0) + getProficiencyBonus(oracleProfRank, currentLevel);
+        const oracleDc = 10 + oracleAttack;
+        return (
+        <div className="space-y-3">
+        {(selectedClass?.slug || selectedClass?.name || '').toLowerCase() === 'psychic' && <PsychicMindSelector value={psychicConsciousMind} onChange={setPsychicConsciousMind} level={currentLevel} subconscious={subclass} />}
+        {hasOracleDedication && (
+          <div className="bg-elevated border border-border-strong rounded-xl p-4 space-y-2 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <strong className="text-white">{t('sheet.oracleSpellcastingLabel')}{oracleEntry?.selection ? ` — ${oracleEntry.selection.name}` : ''}</strong>
+              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-accent/15 text-accent-text border border-accent/40 tabular-nums">
+                {t('sheet.oracleSpellcastingSummary', { attr: attributeShort(t, 'cha'), dc: oracleDc, attack: signed(oracleAttack) })}
+              </span>
+            </div>
+            {!oracleEntry?.selection ? (
+              <p className="text-xs text-status-warn">{t('sheet.oracleMysteryPending')}</p>
+            ) : (
+              <div className="space-y-1.5">
+                {oracleEntry.extraGrants?.map(extra => (
+                  <details key={extra.id}>
+                    <summary className="cursor-pointer text-xs text-accent-text font-semibold">{extra.name}</summary>
+                    <div
+                      className="pf-prose text-xs text-text-secondary mt-1.5"
+                      dangerouslySetInnerHTML={{ __html: cleanDescriptionHtml(extra.description, { actorLevel: currentLevel }) }}
+                    />
+                  </details>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <SpellsSheetTab
-          spellcasting={spellcasting}
+          spellcasting={effectiveSpellcasting}
           attributes={currentAttributes}
           level={currentLevel}
-          onChange={setSpellcasting}
+          isPsychic={isPsychicClass}
+          consciousMindId={psychicConsciousMind}
+          ampFeats={
+            isPsychicClass
+              ? Array.from({ length: currentLevel }, (_, i) => i + 1)
+                  .flatMap(lvl => Object.values(levelData[lvl]?.feats || {}))
+                  .filter(feat => {
+                    try {
+                      const traits = feat.traits ? JSON.parse(feat.traits) as unknown[] : [];
+                      return Array.isArray(traits) && traits.some(tr => String(tr).toLowerCase() === 'amp');
+                    } catch {
+                      return (feat.traits || '').toLowerCase().includes('amp');
+                    }
+                  })
+              : []
+          }
+          focusPoints={effectiveSession.focusPoints}
+          maxFocusPoints={effectiveSession.maxFocusPoints}
+          onSpendFocusPoint={() => setSession(prev => ({
+            ...prev,
+            focusPoints: Math.max(0, Math.min(effectiveSession.maxFocusPoints, prev.focusPoints) - 1),
+          }))}
+          abilityLocked={psychicKeyAttribute !== undefined}
+          conditionPenalty={conditionPenalties.mentalChecks}
+          onChange={next => setSpellcasting(previous => ({ ...previous, proficiency: next.proficiency === effectiveSpellcasting.proficiency ? previous.proficiency : next.proficiency }))}
         />
-      )}
+        </div>
+        );
+      })()}
 
       {sheetTab === 'inventory' && (
         <InventoryView inventory={inventory} strMod={currentAttributes.str || 0} onChange={setInventory} />
@@ -2051,7 +2756,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
               <Award className="w-4 h-4 text-accent-text" />
             )}
 
-            {freeArchetype && renderGroupedFeatCategoryCard(t('sheet.freeArchetype'), 'archetype', allSlotsGrouped.archetype, <Layers className="w-4 h-4 text-accent-text" />)}
+            {effectiveFreeArchetype && renderGroupedFeatCategoryCard(t('sheet.freeArchetype'), 'archetype', allSlotsGrouped.archetype, <Layers className="w-4 h-4 text-accent-text" />)}
 
             {renderGroupedFeatCategoryCard(
               t('sheet.ancestryFeats', { ancestry: activeAncestry?.name || selectedAncestry?.name || t('common.ancestry') }),
@@ -2085,7 +2790,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
               <Layers className="w-4 h-4 text-accent-text" />
               <span className="text-sm font-bold text-text-primary">{t('sheet.tab.progression')}</span>
               {pendingChoicesCount > 0 && (
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-status-warn-bg text-status-warn border border-status-warn-border font-bold tabular-nums">
+                <span className="text-xs px-2 py-0.5 rounded-full bg-status-warn-bg text-status-warn border border-status-warn-border font-bold tabular-nums">
                   {t('sheet.pendingChoices')}: {pendingChoicesCount}
                 </span>
               )}
@@ -2094,16 +2799,17 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
               type="button"
               role="switch"
               aria-label={t('sheet.freeArchetypeOption')}
-              aria-checked={freeArchetype}
+              aria-checked={effectiveFreeArchetype}
+              disabled={defaultFreeArchetype}
               onClick={() => setFreeArchetype(value => !value)}
-              title={t('sheet.freeArchetypeHint')}
-              className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors ${
-                freeArchetype
+              title={defaultFreeArchetype ? t('settings.freeArchetypeHint') : t('sheet.freeArchetypeHint')}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors disabled:opacity-80 ${
+                effectiveFreeArchetype
                   ? 'bg-status-success-bg text-status-success border-status-success-border'
                   : 'bg-elevated text-text-secondary hover:text-text-primary border-border-strong'
               }`}
             >
-              {t('sheet.freeArchetype')}: {freeArchetype ? t('common.on') : t('common.off')}
+              {t('sheet.freeArchetype')}: {effectiveFreeArchetype ? t('common.on') : t('common.off')}
             </button>
           </div>
 
@@ -2147,7 +2853,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                 {isOfficial && !isSelected && (
                   <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 border border-black shadow" title={t('sheet.currentOfficialLevel')} />
                 )}
-                <div className="flex items-center space-x-0.5 mt-0.5 text-[11px]">
+                <div className="flex items-center space-x-0.5 mt-0.5 text-xs">
                   {hasBoost && <span title={t('sheet.attributeBoosts')}>★</span>}
                   {hasSkillInc && <span title={t('sheet.skillIncrease')}>◆</span>}
                 </div>
@@ -2191,7 +2897,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                       {t('sheet.hpRollAtLevel', { die: hpStats.baseClassHp, level: inspectLevel })}
                     </span>
                     {levelData[inspectLevel]?.hpRoll === undefined && (
-                      <span className="text-[11px] text-text-muted">
+                      <span className="text-xs text-text-muted">
                         {t('sheet.hpRollUnrolled', { avg: hpStats.averageClassHp })}
                       </span>
                     )}
@@ -2279,7 +2985,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                         }`}
                       >
                         <span>{attributeName(t, attr)} ({attributeShort(t, attr)})</span>
-                        <span className={`text-[11px] px-1.5 py-0.5 rounded font-black ${
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-black ${
                           selected ? 'bg-black text-white' : 'bg-control text-accent-text'
                         }`}>
                           {signed(currentAttributes[attr])}
@@ -2302,7 +3008,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                   {levelData[inspectLevel]?.skillIncreases?.[0] && (
                     <button
                       onClick={() => removeLevelSkillIncrease(inspectLevel)}
-                      className="text-[11px] text-status-danger hover:text-status-danger font-semibold"
+                      className="text-xs text-status-danger hover:text-status-danger font-semibold"
                     >
                       {t('common.remove')}
                     </button>
@@ -2343,7 +3049,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
               </h4>
 
               {(() => {
-                const slots = getFeatSlotsForLevel(t, inspectLevel, selectedClass?.name || '', freeArchetype, selectedClass?.system_json, levelData[inspectLevel]?.feats, hasVersatileHumanGeneralFeat(selectedHeritage));
+                const slots = getFeatSlotsForLevel(t, inspectLevel, selectedClass?.name || '', effectiveFreeArchetype, selectedClass?.system_json, levelData[inspectLevel]?.feats, hasVersatileHumanGeneralFeat(selectedHeritage));
                 if (slots.length === 0) {
                   return (
                     <p className="text-xs text-text-muted italic p-3 bg-inset rounded-xl border border-border-subtle">
@@ -2375,13 +3081,13 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                               />
                             </div>
                             <div className="min-w-0 flex-1">
-                              <span className="text-[11px] uppercase font-bold text-accent-text block">
+                              <span className="text-xs uppercase font-bold text-accent-text block">
                                 {slot.title}
                               </span>
                               <span className="font-bold text-sm text-white truncate block">
                                 {assignedFeat.featName}
                               </span>
-                              <span className="text-[11px] text-text-secondary">
+                              <span className="text-xs text-text-secondary">
                                 {t('common.level', { level: assignedFeat.level })} • {assignedFeat.category}
                               </span>
                             </div>
@@ -2438,7 +3144,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                           <span className="text-xs font-bold text-white group-hover:text-accent-text transition-colors block">
                             {slot.title}
                           </span>
-                          <span className="text-[11px] text-text-muted">
+                          <span className="text-xs text-text-muted">
                             {t('sheet.clickToSearchFeats')}
                           </span>
                         </div>
@@ -2463,10 +3169,10 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                   <span>{t('sheet.initialTrainedSkills')}</span>
                 </h4>
                 {selectedClass && (
-                  <span className="text-[11px] font-semibold text-accent-text tabular-nums">
+                  <span className="text-xs font-semibold text-accent-text tabular-nums">
                     {t('sheet.initialSkillsBudget', {
                       expected: initialSkillBudget.autoTrained.length + initialSkillBudget.freeBudget,
-                      selected: initialTrainedSkills.size
+                      selected: new Set([...initialTrainedSkills, ...(initialOrderSkill ? [initialOrderSkill] : [])]).size
                     })}
                   </span>
                 )}
@@ -2476,13 +3182,13 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
                 {ALL_SKILLS.map(s => {
-                  const trained = initialTrainedSkills.has(s);
+                  const trained = initialTrainedSkills.has(s) || s === initialOrderSkill;
                   const isFromBg = initialSkillBudget.bgFixed.includes(s);
                   const isFromClass = initialSkillBudget.classFixed.includes(s);
                   return (
                     <button
                       key={s}
-                      onClick={() => toggleInitialTrainedSkill(s)}
+                      onClick={() => { if (s !== initialOrderSkill) toggleInitialTrainedSkill(s); }}
                       title={isFromBg || isFromClass ? t('sheet.initialSkillsFixedHint', { source: [isFromBg ? t('creator.skillsSourceBg') : '', isFromClass ? t('creator.skillsSourceClass') : ''].filter(Boolean).join(' + ') }) : undefined}
                       className={`p-2 rounded-lg text-xs font-semibold border flex items-center justify-between transition-all ${
                         trained
@@ -2491,7 +3197,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                       }`}
                     >
                       <span className="truncate">{skillName(t, s)}</span>
-                      <span className="text-[11px] flex-shrink-0 ml-1">
+                      <span className="text-xs flex-shrink-0 ml-1">
                         {isFromBg || isFromClass ? `${trained ? t('prof.1') : '—'} ★` : (trained ? t('prof.1') : '—')}
                       </span>
                     </button>
@@ -2508,7 +3214,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
           <div className="bg-surface border border-border-strong rounded-2xl p-4 shadow-xl space-y-3">
             <h4 className="text-xs font-black uppercase text-text-secondary tracking-wider flex items-center justify-between">
               <span>{t('sheet.attributesAt', { level: inspectLevel })}</span>
-              <span className="text-[11px] text-accent-text">{t('sheet.currentModifier')}</span>
+              <span className="text-xs text-accent-text">{t('sheet.currentModifier')}</span>
             </h4>
             <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center">
               {ALL_ATTRIBUTES.map(attr => {
@@ -2517,12 +3223,12 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                 const score = 10 + mod * 2 + (isPartial ? 1 : 0);
                 return (
                   <div key={attr} className="bg-inset border border-border-strong rounded-xl p-2.5">
-                    <span className="text-[11px] uppercase font-bold text-text-secondary block">{attributeShort(t, attr)}</span>
+                    <span className="text-xs uppercase font-bold text-text-secondary block">{attributeShort(t, attr)}</span>
                     <span className="text-lg font-black text-white">
                       {mod >= 0 ? `+${mod}` : mod}
                       {isPartial && <span className="text-xs text-accent-text ml-0.5" title="Partial boost (+4+)">*</span>}
                     </span>
-                    <span className="text-[11px] text-text-muted block">({score})</span>
+                    <span className="text-xs text-text-muted block">({score})</span>
                   </div>
                 );
               })}
@@ -2555,7 +3261,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                           return next;
                         });
                       }}
-                      className="px-2.5 py-1 rounded-lg bg-accent hover:bg-accent-hover text-black font-bold text-[11px] transition-colors"
+                      className="px-2.5 py-1 rounded-lg bg-accent hover:bg-accent-hover text-black font-bold text-xs transition-colors"
                     >
                       {t('sheet.rollPendingHp')}
                     </button>
@@ -2581,7 +3287,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                           {t('common.levelShort', { level: l })}
                         </button>
                         <div className="flex items-center gap-1.5">
-                          <span className={`font-black tabular-nums ${roll !== undefined ? 'text-accent-text' : 'text-text-muted text-[11px]'}`}>
+                          <span className={`font-black tabular-nums ${roll !== undefined ? 'text-accent-text' : 'text-text-muted text-xs'}`}>
                             {roll !== undefined ? roll : t('sheet.hpRollAvgBadge', { avg: hpStats.averageClassHp })}
                           </span>
                           <button
@@ -2608,7 +3314,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                 <Award className="w-4 h-4 text-accent-text" />
                 <span>{t('sheet.skillsAt', { level: inspectLevel })}</span>
               </h4>
-              <span className="text-[11px] text-text-secondary">
+              <span className="text-xs text-text-secondary">
                 {t('sheet.bonusFormula')}
               </span>
             </div>
@@ -2628,7 +3334,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                   >
                     <div className="flex items-center space-x-1.5 min-w-0 flex-1">
                       <span className="font-semibold text-white truncate">{skillName(t, s)}</span>
-                      <span className="text-[11px] text-text-muted uppercase flex-shrink-0">({attributeShort(t, info.attribute)})</span>
+                      <span className="text-xs text-text-muted uppercase flex-shrink-0">({attributeShort(t, info.attribute)})</span>
                     </div>
 
                     <div className="flex items-center space-x-2 flex-shrink-0">
@@ -2679,8 +3385,8 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                         className="flex items-center justify-between gap-2 p-2 rounded-lg bg-inset border border-border-subtle text-xs"
                       >
                         <div className="flex items-center space-x-1.5 min-w-0 flex-1">
-                          <span className="font-semibold text-white truncate">{lore.name}</span>
-                          <span className="text-[11px] text-text-muted uppercase flex-shrink-0">({attributeShort(t, 'int')})</span>
+                          {lore.id === 'lore_scout_terrain' ? <input aria-label={t('sheet.scoutTerrainLore')} placeholder={t('sheet.scoutTerrainLore')} value={lore.name} onChange={event => setLoreSkills(previous => previous.map(item => item.id === lore.id ? { ...item, name: event.target.value } : item))} className="min-w-0 w-full bg-control rounded px-2 py-1 text-white" /> : <span className="font-semibold text-white truncate">{lore.name}</span>}
+                          <span className="text-xs text-text-muted uppercase flex-shrink-0">({attributeShort(t, 'int')})</span>
                         </div>
                         <div className="flex items-center space-x-2 flex-shrink-0">
                           <ProficiencySelector
@@ -2751,7 +3457,7 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
                           <img src={icon} alt="" className="w-6 h-6 rounded bg-elevated p-0.5 object-contain flex-shrink-0" />
                           <span className="font-semibold text-white truncate">{feat.featName}</span>
                         </div>
-                        <span className="text-[11px] text-accent-text font-bold px-1.5 py-0.5 rounded bg-elevated ml-2 flex-shrink-0">
+                        <span className="text-xs text-accent-text font-bold px-1.5 py-0.5 rounded bg-elevated ml-2 flex-shrink-0">
                           {t('common.levelShort', { level })}
                         </span>
                       </div>
@@ -2776,9 +3482,11 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
           slotTitle={activeSlotModal.slotTitle}
           slotCategory={activeSlotModal.slotCategory}
           maxLevel={activeSlotModal.maxLevel}
+          characterLevel={activeLevel}
           ruleAttributes={computeAttributesAtLevel(baseAttributes, levelData, activeSlotModal.level).mods}
           ruleSkills={(() => {
             const ranks = Object.fromEntries(ALL_SKILLS.map(skill => [skill, initialTrainedSkills.has(skill) ? 1 : 0])) as Record<SkillKey, ProficiencyRank>;
+            if (initialOrderSkill) ranks[initialOrderSkill] = Math.max(ranks[initialOrderSkill], 1) as ProficiencyRank;
             for (let level = 1; level <= activeSlotModal.level; level++) {
               if (choiceResolution) {
                 choiceResolution.featsAt(activeSlotModal.level, activeSlotModal.slotId)
@@ -2804,6 +3512,8 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
           selectedFeatId={levelData[activeSlotModal.level]?.feats?.[activeSlotModal.slotId]?.featId}
           ancestryTrait={activeSlotModal.ancestryTrait}
           ancestryName={activeSlotModal.ancestryName}
+          characterClass={selectedClass}
+          heritageName={selectedHeritage?.name || ''}
           extraAncestryTraits={getHeritageExtraTraits(selectedHeritage)}
           onSelectFeat={handleSelectFeatForSlot}
           onClose={() => setActiveSlotModal(null)}
@@ -2824,6 +3534,14 @@ export const LevelProgressionView: React.FC<LevelProgressionViewProps> = ({
           variant="alert"
           onCancel={() => setSaveErrorMsg(null)}
           onConfirm={() => setSaveErrorMsg(null)}
+        />
+      )}
+      {checkRoll && (
+        <DiceRollerModal
+          initialFormula={checkRoll.formula}
+          initialLabel={checkRoll.label}
+          autoRoll
+          onClose={() => setCheckRoll(null)}
         />
       )}
     </div>

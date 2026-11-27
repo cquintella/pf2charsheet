@@ -105,7 +105,88 @@ html[data-theme="light"] {
   --status-purple-border: 216 180 254;
 }
 
+html[data-theme="glass"] {
+  color-scheme: dark;
+  --bg-canvas: 14 18 23;
+  --bg-surface: 20 25 34;
+  --bg-elevated: 27 34 45;
+  --bg-inset: 16 20 27;
+  --bg-control: 36 46 61;
+  --border-subtle: 110 126 145;
+  --border-strong: 140 155 172;
+  --accent: 34 211 238;
+  --accent-hover: 103 232 249;
+  --accent-text: 103 232 249;
+  --accent-contrast: 8 30 38;
+}
+
 @media screen {
+  html[data-theme="glass"] .app-shell {
+    background-image: radial-gradient(ellipse at 20% 10%, #394653, transparent 55%),
+      radial-gradient(ellipse at 85% 80%, #483b38, transparent 55%);
+  }
+
+  html[data-theme="glass"] main {
+    background-color: rgb(var(--bg-canvas));
+    background-image: radial-gradient(ellipse at 20% 10%, #394653, transparent 55%),
+      radial-gradient(ellipse at 85% 80%, #483b38, transparent 55%);
+  }
+
+  html[data-theme="glass"] .app-sidebar {
+    background: rgb(var(--bg-surface) / 0.2);
+    border-color: rgb(var(--border-subtle) / 0.4);
+  }
+
+  html[data-theme="glass"] :is(.bg-surface, .bg-elevated, .bg-inset, .bg-control, .bg-canvas):not(main, .app-shell) {
+    --tw-bg-opacity: 0.2;
+  }
+
+  html[data-theme="glass"] .proficiency-legend {
+    background: rgb(var(--bg-inset) / 0.2);
+  }
+
+  html[data-theme="glass"] :is(div, section, article).bg-surface:is(.rounded-xl, .rounded-2xl),
+  html[data-theme="glass"] :is(div, section, article).bg-inset:is(.rounded-xl, .rounded-2xl) {
+    background-color: rgb(var(--bg-surface) / 0.2);
+    border-color: rgb(var(--border-strong) / 0.35);
+    -webkit-backdrop-filter: blur(20px) saturate(1.25);
+    backdrop-filter: blur(20px) saturate(1.25);
+  }
+
+  html[data-theme="glass"] :is(div, section, article).bg-elevated:is(.rounded-xl, .rounded-2xl) {
+    background-color: rgb(var(--bg-elevated) / 0.2);
+    border-color: rgb(var(--border-strong) / 0.35);
+  }
+
+  html[data-theme="glass"] :is(input, select, textarea).bg-surface {
+    background-color: rgb(var(--bg-surface) / 0.2);
+  }
+
+  html[data-theme="glass"] .feat-compendium-card.border-status-warn-border {
+    border-color: rgb(var(--accent) / 0.5);
+  }
+
+  html[data-theme="glass"] .feat-compendium-card .bg-status-warn-bg,
+  html[data-theme="glass"] .compendium-detail .bg-status-warn-bg {
+    background-color: rgb(var(--accent) / 0.15);
+    border-color: rgb(var(--accent) / 0.4);
+  }
+
+  html[data-theme="glass"] .feat-compendium-card .text-status-warn,
+  html[data-theme="glass"] .compendium-detail .text-status-warn {
+    color: rgb(var(--accent-text));
+  }
+
+  html[data-theme="glass"] .compendium-detail-backdrop {
+    background-color: rgb(var(--bg-canvas) / 0.45);
+  }
+
+  html[data-theme="glass"] .compendium-detail .pf-trait:not(.pf-trait-rarity-uncommon):not(.pf-trait-rarity-rare):not(.pf-trait-rarity-unique) {
+    color: rgb(var(--accent-text));
+    background-color: rgb(var(--accent) / 0.15);
+    border-color: rgb(var(--accent) / 0.4);
+  }
+
   html[data-theme="light"] .text-white {
     color: rgb(var(--text-primary)) !important;
   }
@@ -127,7 +208,8 @@ html[data-theme="light"] {
   :root,
   html[data-theme="current"],
   html[data-theme="dark"],
-  html[data-theme="light"] {
+  html[data-theme="light"],
+  html[data-theme="glass"] {
     --bg-canvas: 255 255 255;
     --bg-surface: 255 255 255;
     --bg-elevated: 248 250 252;

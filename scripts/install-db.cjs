@@ -22,3 +22,15 @@ if (customCreatures.status !== 0) {
   console.error('Falha ao importar criaturas locais.');
   process.exit(customCreatures.status || 1);
 }
+
+const satori = spawnSync(process.execPath, [path.join(__dirname, 'import-satori.cjs')], { stdio: 'inherit' });
+if (satori.status !== 0) {
+  console.error('Falha ao importar Satori.');
+  process.exit(satori.status || 1);
+}
+
+const psionicHeritages = spawnSync(process.execPath, [path.join(__dirname, 'import-psionic-heritages.cjs')], { stdio: 'inherit' });
+if (psionicHeritages.status !== 0) {
+  console.error('Falha ao importar heranças psiônicas.');
+  process.exit(psionicHeritages.status || 1);
+}

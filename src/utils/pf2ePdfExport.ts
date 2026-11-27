@@ -1,4 +1,4 @@
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import {
   ALL_ATTRIBUTES,
   ALL_SKILLS,
@@ -28,6 +28,7 @@ export interface PdfExportPayload {
   portrait?: string;
   vision: VisionType;
   senses: string;
+  languages: string;
   attributes: Record<AttributeKey, number>;
   maxHp: number;
   ac: number;
@@ -41,6 +42,9 @@ export interface PdfExportPayload {
   skillRanks: Record<SkillKey, ProficiencyRank>;
   strikes: CharacterStrike[];
   levelData: Record<number, LevelProgressionData>;
+  grantedFeats: { level: number; name: string; category: string }[];
+  backgroundFeats: string[];
+  classFeatures: { level: number; name: string }[];
   inventory: CharacterInventory;
   session: SessionState;
   companions: CharacterCompanion[];
@@ -102,11 +106,12 @@ async function loadImageAsPngBytes(src: string): Promise<Uint8Array | null> {
   });
 }
 
-export async function exportCharacterToFillablePdf(data: PdfExportPayload): Promise<void> {
+export async function exportCharacterToFillablePdf(data: PdfExportPayload, template: 'standard' | 'master' = 'standard'): Promise<void> {
+  const filename = template === 'master' ? 'pf2echarsheet-master-fillable.pdf' : 'pf2e-sheet-fillable.pdf';
   const pdfUrl =
     typeof window !== 'undefined' && window.location.protocol === 'file:'
-      ? './assets/pf2e-sheet-fillable.pdf'
-      : '/assets/pf2e-sheet-fillable.pdf';
+      ? `./assets/${filename}`
+      : `/assets/${filename}`;
 
   const res = await fetch(pdfUrl);
   if (!res.ok) {
@@ -218,6 +223,7 @@ export async function exportCharacterToFillablePdf(data: PdfExportPayload): Prom
   const visionLabel =
     data.vision === 'normal' ? 'Normal Vision' : data.vision.replace(/-/g, ' ');
   setText('SENSES', [visionLabel, data.senses].filter(Boolean).join(', '));
+  setText(template === 'master' ? 'p1_txt_105' : 'Languages', data.languages);
 
   // 6. Skills
   ALL_SKILLS.forEach((skill) => {
@@ -264,21 +270,62 @@ export async function exportCharacterToFillablePdf(data: PdfExportPayload): Prom
     setText(slot.spec, signedStr(s.otherDamage));
     setText(slot.traits, s.traits);
   });
+  if (template === 'master') {
+    const rows = [
+      ['Weapon', 'p1_txt_48', 'p1_txt_49', 'DICE', 'TRAITS'],
+      ['Weapon_2', 'p1_txt_60', 'p1_txt_61', 'DICE_2', 'TRAITS_2'],
+      ['Weapon_3', 'p1_txt_75', 'p1_txt_76', 'DICE_3', 'TRAITS_3'],
+    ];
+    data.strikes.slice(0, 3).forEach((strike, index) => {
+      const [name, attack, map, damage, traits] = rows[index];
+      setText(name, strike.weapon);
+      setText(attack, signedStr(data.attributes[strike.attribute] + getProficiencyBonus(strike.proficiency, data.level) + strike.itemBonus));
+      setText(map, /\bagile\b/i.test(strike.traits) ? '-4 / -8' : '-5 / -10');
+      setText(damage, `${strike.dice} ${strike.damageType}`);
+      setText(traits, strike.traits);
+    });
+  }
 
   // 8. Feats across levels
   const archetypeFeats: string[] = [];
+  const featLines: string[] = [];
+  const appendField = (name: string, value: string): boolean => {
+    try {
+      const field = form.getTextField(name);
+      const previous = field.getText();
+      field.setText([previous, value].filter(Boolean).join('; '));
+      return true;
+    } catch { return false; }
+  };
+  data.backgroundFeats.forEach(name => { appendField('BACKGROUND SKILL FEAT', name); featLines.push(`Lv 1: ${name} (background)`); });
   for (let lvl = 1; lvl <= data.level; lvl++) {
     const feats = data.levelData[lvl]?.feats || {};
     Object.entries(feats).forEach(([slotId, feat]) => {
-      if (slotId.startsWith('ancestry_')) setText(`ANCESTRY ${lvl}`, feat.featName);
-      else if (slotId.startsWith('skill_')) setText(`SKILL FEAT ${lvl}`, feat.featName);
-      else if (slotId.startsWith('general_')) setText(`GENERAL FEAT ${lvl}`, feat.featName);
-      else if (slotId.startsWith('class_')) setText(`CLASS FEAT ${lvl}`, feat.featName);
-      else if (slotId.startsWith('archetype_')) archetypeFeats.push(`Lv ${lvl}: ${feat.featName}`);
+      if (slotId.startsWith('order_explorer_')) return;
+      featLines.push(`Lv ${lvl}: ${feat.featName}`);
+      const field = slotId.startsWith('ancestry_') ? `ANCESTRY ${lvl}`
+        : slotId.startsWith('skill_') ? `SKILL FEAT ${lvl}`
+        : slotId.startsWith('general_') ? `GENERAL FEAT ${lvl}`
+        : slotId.startsWith('class_') || slotId === 'order_1' ? (template === 'master' && lvl === 1 ? 'CLASS FEATURE 1-1' : `CLASS FEAT ${lvl}`)
+        : '';
+      if (!field || !appendField(field, feat.featName)) archetypeFeats.push(`Lv ${lvl}: ${feat.featName}`);
     });
   }
+  data.grantedFeats.filter(feat => feat.level <= data.level).forEach(feat => {
+    const field = feat.category === 'class' ? (template === 'master' && feat.level === 1 ? 'CLASS FEATURE 1-1' : `CLASS FEAT ${feat.level}`)
+      : feat.category === 'skill' ? `SKILL FEAT ${feat.level}`
+      : feat.category === 'ancestry' ? `ANCESTRY ${feat.level}`
+      : feat.category === 'general' ? `GENERAL FEAT ${feat.level}` : '';
+    if (!field || !appendField(field, feat.name)) archetypeFeats.push(`Lv ${feat.level}: ${feat.name}`);
+  });
   if (archetypeFeats[0]) setText('BONUS FEAT 1', archetypeFeats[0]);
   if (archetypeFeats[1]) setText('BONUS FEAT 2', archetypeFeats[1]);
+  data.classFeatures.filter(feature => feature.level <= data.level).forEach(feature => {
+    const field = feature.level === 1 ? 'CLASS FEATURE 1-1' : `CLASS FEATURE ${feature.level}`;
+    try {
+      appendField(field, feature.name);
+    } catch { /* Additional features are listed in the appendix. */ }
+  });
 
   // 9. Inventory & Coins
   setText('COPPER PIECES', data.inventory.coins.cp);
@@ -298,6 +345,19 @@ export async function exportCharacterToFillablePdf(data: PdfExportPayload): Prom
       /* ignore */
     }
   });
+  if (template === 'master') {
+    const inventoryLine = (entry: CharacterInventory['items'][number]) => `${entry.item.name}${entry.quantity > 1 ? ` (x${entry.quantity})` : ''}`;
+    setText('p2_txt_52', data.inventory.items.filter(entry => entry.equipped).map(inventoryLine).join('\n'));
+    setText('p2_txt_53', data.inventory.items.filter(entry => !entry.equipped).map(inventoryLine).join('\n'));
+    for (let i = 1; i <= 3; i++) {
+      try { const box = form.getCheckBox(`p1_chk_${i}`); if (data.session.heroPoints >= i) box.check(); else box.uncheck(); } catch { /* Field absent. */ }
+    }
+    for (const [start, count, value] of [[10, 4, data.session.dying], [14, 3, data.session.wounded]] as const) {
+      for (let i = 0; i < count; i++) {
+        try { const box = form.getCheckBox(`p1_chk_${start + i}`); if ((value || 0) > i) box.check(); else box.uncheck(); } catch { /* Field absent. */ }
+      }
+    }
+  }
 
   // 10. Notes / Companions / Extra Archetype Feats
   const noteSections: string[] = [];
@@ -332,6 +392,11 @@ export async function exportCharacterToFillablePdf(data: PdfExportPayload): Prom
     setText('SPELL DC ABILITY', signedStr(scAbilityMod));
     setText('SPELL DC PROF', signedStr(scProfBonus));
     checkRankBoxes('SPELL DC', sc.proficiency);
+    if (template === 'master') {
+      const traditions: Record<string, number> = { arcane: 5, divine: 6, occult: 7, primal: 8 };
+      const traditionIndex = traditions[sc.tradition];
+      if (traditionIndex) { try { form.getCheckBox(`p4_chk_${traditionIndex}`).check(); } catch { /* Field absent. */ } }
+    }
 
     for (let rank = 1; rank <= 10; rank++) {
       const maxSlots = sc.slotsMax[rank] || 0;
@@ -350,7 +415,7 @@ export async function exportCharacterToFillablePdf(data: PdfExportPayload): Prom
       const pngBytes = await loadImageAsPngBytes(resolvedPortrait);
       if (pngBytes) {
         const embedded = await doc.embedPng(pngBytes);
-        const btn = form.getButton('Image163_af_image');
+        const btn = form.getButton(template === 'master' ? 'retrato_personagem' : 'Image163_af_image');
         const widget = btn.acroField.getWidgets()[0];
         const pages = doc.getPages();
         const pageIdx = widget ? pages.findIndex(p => p.ref === widget.P()) : -1;
@@ -369,6 +434,23 @@ export async function exportCharacterToFillablePdf(data: PdfExportPayload): Prom
     }
   }
 
+  const appendix = [
+    { heading: 'Feats', lines: [...featLines, ...data.grantedFeats.filter(feat => feat.level <= data.level).map(feat => `Lv ${feat.level}: ${feat.name} (granted)`)] },
+    { heading: 'Class features', lines: data.classFeatures.filter(feature => feature.level <= data.level).map(feature => `Lv ${feature.level}: ${feature.name}`) },
+  ].filter(section => section.lines.length);
+  if (appendix.length) {
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+    let page = doc.addPage();
+    let y = page.getHeight() - 48;
+    const writeLine = (text: string, heading = false) => {
+      if (y < 48) { page = doc.addPage(); y = page.getHeight() - 48; }
+      const safe = Array.from(text).filter(char => { try { font.encodeText(char); return true; } catch { return false; } }).join('');
+      page.drawText(safe, { x: 48, y, size: heading ? 13 : 10, font: heading ? bold : font, color: rgb(0, 0, 0), maxWidth: page.getWidth() - 96 });
+      y -= heading ? 22 : 16;
+    };
+    appendix.forEach(section => { writeLine(section.heading, true); section.lines.forEach(line => writeLine(line)); y -= 12; });
+  }
   const outBytes = await doc.save();
   const blob = new Blob([outBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
   const url = URL.createObjectURL(blob);

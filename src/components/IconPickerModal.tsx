@@ -149,7 +149,7 @@ export const IconPickerModal: React.FC<IconPickerModalProps> = ({
                         loading="lazy"
                       />
                     </div>
-                    <span className="text-[11px] text-text-primary group-hover:text-accent-text truncate w-full capitalize leading-tight">
+                    <span className="text-xs text-text-primary group-hover:text-accent-text truncate w-full capitalize leading-tight">
                       {ico.name}
                     </span>
                     {isSelected && (

@@ -1,4 +1,4 @@
-import { useEffect, RefObject } from 'react';
+import { useEffect, useRef, RefObject } from 'react';
 
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -12,6 +12,8 @@ export function useModalFocus(
   onClose: () => void,
   active: boolean = true
 ): void {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     if (!active) return;
     const previousFocus = document.activeElement as HTMLElement | null;
@@ -27,7 +29,7 @@ export function useModalFocus(
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.stopPropagation();
-        onClose();
+        closeRef.current();
         return;
       }
       if (event.key !== 'Tab' || !containerRef.current) return;
@@ -54,7 +56,7 @@ export function useModalFocus(
         previousFocus.focus();
       }
     };
-  }, [active, containerRef, onClose]);
+  }, [active, containerRef]);
 }
 
 /** Props auxiliares para tornar elementos não-nativos clicáveis acessíveis via teclado. */
